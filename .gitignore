@@ -1,0 +1,14 @@
+.DS_Store
+
+# Python/runtime artifacts
+__pycache__/
+*.py[cod]
+
+# Local IDE metadata
+.idea/
+
+# Local browser/cache output
+.chrome-pdf-profile/
+.chrome-pdf-profile-*/
+.quantclass_half_tao_cache/
+.quantclass_half_tao_cache_*/

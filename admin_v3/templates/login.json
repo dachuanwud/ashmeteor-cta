@@ -1,0 +1,48 @@
+{
+  "type": "page",
+  "title": "量化管理平台登录页面",
+  "body": [
+    {
+      "type": "form",
+      "title": "表单",
+      "body": [
+        {
+          "label": "用户名",
+          "type": "input-text",
+          "name": "username",
+          "id": "u:167618258590"
+        },
+        {
+          "type": "input-password",
+          "label": "谷歌验证码",
+          "name": "google_code",
+          "id": "u:5b33a9a488e7"
+        }
+      ],
+      "mode": "horizontal",
+      "api": {
+        "method": "post",
+        "url": "/login"
+      },
+      "horizontal": {
+        "leftFixed": "",
+        "left": 1,
+        "right": 11
+      },
+      "wrapWithPanel": true,
+      "id": "u:c79723de95c3",
+      "onEvent": {
+        "submitSucc": {
+          "weight": 0,
+          "actions": [
+            {
+              "args": {},
+              "actionType": "refresh"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "id": "u:75bdffa0e46e"
+}
