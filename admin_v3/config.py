@@ -19,13 +19,13 @@ dapi_path = os.path.join(data_path, 'dapi')
 if not os.path.exists(dapi_path):
     os.mkdir(dapi_path)
 
-debug = False
+debug = os.getenv('ASHMETEOR_DEBUG', '').lower() in ('1', 'true', 'yes')
 
 # 链接mysql的uri
 sql_uri = os.getenv('ASHMETEOR_SQL_URI', 'mysql+pymysql://root:password@localhost:3306/alpha')
 
 # 生成谷歌验证码的密钥
-google_key = ''
+google_key = os.getenv('ASHMETEOR_GOOGLE_KEY', '')
 
 # 自动添加半套策略
 auto_add_re = True
@@ -34,7 +34,7 @@ auto_add_re = True
 pos_infer = False
 
 # 超级密码 临时有用可以用到
-super_mm = ''
+super_mm = os.getenv('ASHMETEOR_SUPER_MM', '')
 
 # amis在线编辑器的域（debug模式下可用）（废弃，暂时用不到）
 amis_edit_origin = 'https://aisuda.github.io'
@@ -45,7 +45,9 @@ local_origin = ''
 # 允许外部访问的ip白名单
 # 允许外部访问的ip白名单
 ip_white_list = [
-    '*'  # *会允许所有ip访问该地址, 但是你毕竟有谷歌验证码, 不是吗
+    ip.strip()
+    for ip in os.getenv('ASHMETEOR_IP_WHITE_LIST', '*').split(',')
+    if ip.strip()
 ]
 
 # 自动止盈止损不需要覆盖的策略
@@ -90,5 +92,9 @@ class User:
 
 
 users = [
-    User(1, "猫妈"),
+    User(i + 1, username.strip())
+    for i, username in enumerate(
+        os.getenv('ASHMETEOR_USERS', '猫妈').split(',')
+    )
+    if username.strip()
 ]

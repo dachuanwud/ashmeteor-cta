@@ -5,6 +5,27 @@ import random
 
 eps = 1e-8
 
+
+if not hasattr(pd.DataFrame, 'append'):
+    def _dataframe_append(self,
+                          other,
+                          ignore_index=False,
+                          verify_integrity=False,
+                          sort=False):
+        if isinstance(other, dict):
+            other = pd.DataFrame([other])
+        elif isinstance(other, pd.Series):
+            other = other.to_frame().T
+        elif isinstance(other, list):
+            other = pd.DataFrame(other)
+        return pd.concat([self, other],
+                         ignore_index=ignore_index,
+                         verify_integrity=verify_integrity,
+                         sort=sort)
+
+    pd.DataFrame.append = _dataframe_append
+
+
 pd.set_option('expand_frame_repr', False)
 pd.set_option('display.max_rows', 100)  # 最多显示数据的行数
 
