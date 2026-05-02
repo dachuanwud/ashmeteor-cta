@@ -63,6 +63,61 @@ def robust(func, params={}, func_name='', retry_times=5, sleep_seconds=5):
             time.sleep(sleep_seconds)
 
 
+def ccxt_public_call(exchange, method_names, params=None):
+    for name in method_names:
+        if hasattr(exchange, name):
+            func = getattr(exchange, name)
+            if params is None:
+                return func()
+            try:
+                return func(params=params)
+            except TypeError:
+                return func(params)
+    raise AttributeError(f'ccxt method not found: {method_names}')
+
+
+def get_fapi_public_exchange_info(exchange):
+    return ccxt_public_call(exchange,
+                            ('fapiPublic_get_exchangeinfo',
+                             'fapiPublicGetExchangeInfo'))
+
+
+def get_dapi_public_exchange_info(exchange):
+    return ccxt_public_call(exchange,
+                            ('dapiPublic_get_exchangeinfo',
+                             'dapiPublicGetExchangeInfo'))
+
+
+def get_fapi_public_premium_index(exchange):
+    return ccxt_public_call(exchange,
+                            ('fapiPublic_get_premiumindex',
+                             'fapiPublicGetPremiumIndex'))
+
+
+def get_fapi_public_continuous_klines(exchange, params):
+    return ccxt_public_call(exchange,
+                            ('fapiPublic_get_continuousklines',
+                             'fapiPublicGetContinuousKlines'), params)
+
+
+def get_dapi_public_klines(exchange, params):
+    return ccxt_public_call(exchange,
+                            ('dapiPublic_get_klines', 'dapiPublicGetKlines'),
+                            params)
+
+
+def get_fapi_public_ticker_24hr(exchange, params=None):
+    return ccxt_public_call(exchange,
+                            ('fapiPublic_get_ticker_24hr',
+                             'fapiPublicGetTicker24hr'), params)
+
+
+def get_dapi_public_ticker_24hr(exchange, params=None):
+    return ccxt_public_call(exchange,
+                            ('dapiPublic_get_ticker_24hr',
+                             'dapiPublicGetTicker24hr'), params)
+
+
 # =====企业微信机器人推送消息
 def send_wechat(message):
     if wechat_hook_key.strip() == '':
@@ -891,7 +946,7 @@ def get_dapi_account_balance(exchange, account_type=ACCOUNT_TYPE_STANDARD):
     positions = account_info['positions']
     items = []
 
-    data = exchange.dapiPublic_get_exchangeinfo()
+    data = get_dapi_public_exchange_info(exchange)
     _symbol_list = list(
         filter(
             lambda s: s['contractStatus'] == 'TRADING' and s['contractType'] ==
@@ -1076,7 +1131,7 @@ def get_account_management_uni_transfer_history(exchange):
 
 
 def get_fapi_fundingrate(exchange):
-    data = exchange.fapiPublic_get_premiumindex()
+    data = get_fapi_public_premium_index(exchange)
     items = []
 
     for s in data:
@@ -1144,7 +1199,7 @@ def strategy_update_params(data):
 
 
 def get_taker_by_ratio(exchange):
-    exchange_info = exchange.fapiPublic_get_exchangeinfo()
+    exchange_info = get_fapi_public_exchange_info(exchange)
     _symbol_list = [
         x['symbol'] for x in exchange_info['symbols']
         if x['status'] == 'TRADING'
@@ -1186,7 +1241,7 @@ def get_taker_by_ratio(exchange):
 def get_bbw_for_all(exchange, interval='1d'):
     if interval == '':
         return {'status': 0, 'msg': '', 'data': {'items': []}}
-    exchange_info = exchange.fapiPublic_get_exchangeinfo()
+    exchange_info = get_fapi_public_exchange_info(exchange)
     _symbol_list = list(
         filter(
             lambda s: s['status'] == 'TRADING' and s['contractType'] ==
@@ -1244,7 +1299,7 @@ def get_kline_for_taker_by_ratio(exchange, symbol, interval, backhour):
         'limit': backhour
     }
     # ===call KLine API
-    kline = exchange.fapiPublic_get_continuousklines(params=params)
+    kline = get_fapi_public_continuous_klines(exchange, params)
 
     # 将数据转换为DataFrame
     columns = [
@@ -1305,7 +1360,7 @@ def get_kline_for_bbw_all(exchange, symbol, interval, backhour):
         'limit': backhour
     }
     # ===call KLine API
-    kline = exchange.fapiPublic_get_continuousklines(params=params)
+    kline = get_fapi_public_continuous_klines(exchange, params)
     # 将数据转换为DataFrame
     columns = [
         'candle_begin_time', 'open', 'high', 'low', 'close', 'volume',
@@ -1429,7 +1484,7 @@ def get_kline(exchange, symbol, interval, backhour, start_date=None):
             'limit': backhour
         }
         # ===call KLine API
-        symbol_data = exchange.fapiPublic_get_continuousklines(params=params)
+        symbol_data = get_fapi_public_continuous_klines(exchange, params)
     else:
         if time_interval.find('m') >= 0:
             data_timedelta = timedelta(
@@ -1455,8 +1510,7 @@ def get_kline(exchange, symbol, interval, backhour, start_date=None):
                 'limit': 1500
             }
             # ===call KLine API
-            symbol_data = exchange.fapiPublic_get_continuousklines(
-                params=params)
+            symbol_data = get_fapi_public_continuous_klines(exchange, params)
 
     def _get_data(end, max_len=1000):
         nonlocal symbol_data, start, earliest, time_interval
@@ -1475,7 +1529,7 @@ def get_kline(exchange, symbol, interval, backhour, start_date=None):
             'limit': max_len
         }
         # ===call KLine API
-        temp_data = exchange.fapiPublic_get_continuousklines(params=params)
+        temp_data = get_fapi_public_continuous_klines(exchange, params)
         # temp_data = exchange.dapiPublic_get_klines(params={'symbol': symbol, 'interval': time_interval, 'endTime': end,'limit': max_len})
         # symbol=symbol, interval=time_interval, endTime=end,
         #                                    limit=max_len)
@@ -1550,7 +1604,7 @@ def dapi_get_kline(exchange, symbol, interval, backhour, start_date=None):
     if backhour < 100:
         params = {'symbol': symbol, 'interval': interval, 'limit': backhour}
         # ===call KLine API
-        symbol_data = exchange.dapiPublic_get_klines(params)
+        symbol_data = get_dapi_public_klines(exchange, params)
     else:
         if time_interval.find('m') >= 0:
             data_timedelta = timedelta(
@@ -1568,12 +1622,12 @@ def dapi_get_kline(exchange, symbol, interval, backhour, start_date=None):
         else:
             params = {'symbol': symbol, 'interval': interval, 'limit': 1500}
             # ===call KLine API
-            symbol_data = exchange.dapiPublic_get_klines(params)
+            symbol_data = get_dapi_public_klines(exchange, params)
 
     def _get_data(end, max_len=1000):
         nonlocal symbol_data, start, earliest, time_interval
 
-        temp_data = exchange.dapiPublic_get_klines({
+        temp_data = get_dapi_public_klines(exchange, {
             'symbol': symbol,
             'interval': time_interval,
             'endTime': end,
@@ -2277,7 +2331,7 @@ def get_all_account_balance(binance_list):
 
 
 def get_symbol_list(exchange):
-    exchange_info = exchange.fapiPublic_get_exchangeinfo()
+    exchange_info = get_fapi_public_exchange_info(exchange)
     _symbol_list = [
         x['symbol'] for x in exchange_info['symbols']
         if x['status'] == 'TRADING'
@@ -2545,7 +2599,7 @@ def get_same_account_max_free_asset(exchange, type, asset):
 
 
 def get_exchange_info(exchange, use_notional=False):
-    exchange_info = exchange.fapiPublic_get_exchangeinfo()
+    exchange_info = get_fapi_public_exchange_info(exchange)
     _symbol_list = [
         x['symbol'] for x in exchange_info['symbols']
         if x['status'] == 'TRADING'
@@ -2584,7 +2638,7 @@ def get_exchange_info(exchange, use_notional=False):
 
 
 def get_dapi_exchange_info(exchange):
-    exchange_info = exchange.dapiPublic_get_exchangeinfo()
+    exchange_info = get_dapi_public_exchange_info(exchange)
     price_precision = {}
 
     for x in exchange_info['symbols']:
@@ -2599,7 +2653,7 @@ def get_dapi_exchange_info(exchange):
 
 
 def get_dapi_perp_symbol_list(exchange):
-    exchange_info = exchange.dapiPublic_get_exchangeinfo()
+    exchange_info = get_dapi_public_exchange_info(exchange)
     _symbol_list = [
         x['symbol'] for x in exchange_info['symbols']
         if x['contractStatus'] == 'TRADING'
@@ -2613,25 +2667,27 @@ def get_dapi_perp_symbol_list(exchange):
 # 获取币安的ticker数据
 def fetch_binance_ticker_data(exchange, symbol=None):
     if symbol is None:
-        tickers = exchange.fapiPublic_get_ticker_24hr()
+        tickers = get_fapi_public_ticker_24hr(exchange)
         tickers = pd.DataFrame(tickers, dtype=float)
         tickers.set_index('symbol', inplace=True)
         return tickers.to_dict(orient='dict')['lastPrice']
     else:
-        tickers = exchange.fapiPublic_get_ticker_24hr({'symbol': symbol})
+        tickers = get_fapi_public_ticker_24hr(exchange, {'symbol': symbol})
         return float(tickers['lastPrice'])
 
 
 # 获取币安的ticker数据
 def fetch_binance_dapi_ticker_data(exchange, symbol=None):
     if symbol is None:
-        tickers = exchange.dapiPublic_get_ticker_24hr()
+        tickers = get_dapi_public_ticker_24hr(exchange)
         tickers = pd.DataFrame(tickers, dtype=float)
         tickers.set_index('symbol', inplace=True)
         return tickers.to_dict(orient='dict')['lastPrice']
     else:
-        tickers = exchange.dapiPublic_get_ticker_24hr({'symbol': symbol})
-        return float(tickers[0]['lastPrice'])
+        tickers = get_dapi_public_ticker_24hr(exchange, {'symbol': symbol})
+        if isinstance(tickers, list):
+            tickers = tickers[0]
+        return float(tickers['lastPrice'])
 
 
 # 获取当日成交订单

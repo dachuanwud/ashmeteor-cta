@@ -1575,7 +1575,7 @@ def cta_usd_rebalance(*args):
             price_precision = get_dapi_exchange_info(exchange)
             last_price = fetch_binance_dapi_ticker_data(exchange)
 
-            data = exchange.dapiPublic_get_exchangeinfo()
+            data = get_dapi_public_exchange_info(exchange)
             _symbol_list = list(
                 filter(
                     lambda s: s['contractStatus'] == 'TRADING' and s[
