@@ -65,6 +65,7 @@ class BinanceAccountAdapter:
         return self.get_cm_account().get('positions', [])
 
     def get_cm_position_risk(self, params=None):
+        params = params or {}
         if self.is_unified:
             return self.exchange.papiGetCmPositionRisk(params=params)
         return self._call_exchange(
@@ -72,6 +73,7 @@ class BinanceAccountAdapter:
             params=params)
 
     def get_cm_adl_quantile(self, params=None):
+        params = params or {}
         if self.is_unified:
             return self.exchange.papiGetCmAdlQuantile(params=params)
         return self._call_exchange(

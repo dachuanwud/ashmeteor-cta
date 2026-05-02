@@ -90,8 +90,8 @@ class BinanceAccountAdapterTest(unittest.TestCase):
 
         self.assertEqual(positions[0]['symbol'], 'ETHUSD_PERP')
         self.assertEqual(adl[0]['symbol'], 'ETHUSD_PERP')
-        self.assertIn(('dapi_position_risk', None), exchange.calls)
-        self.assertIn(('dapi_adl_quantile', None), exchange.calls)
+        self.assertIn(('dapi_position_risk', {}), exchange.calls)
+        self.assertIn(('dapi_adl_quantile', {}), exchange.calls)
 
     def test_unified_account_normalizes_papi_balance_and_order(self):
         exchange = FakeExchange()
@@ -117,8 +117,8 @@ class BinanceAccountAdapterTest(unittest.TestCase):
 
         self.assertEqual(positions[0]['symbol'], 'ETHUSD_PERP')
         self.assertEqual(adl[0]['symbol'], 'ETHUSD_PERP')
-        self.assertIn(('papi_position_risk', None), exchange.calls)
-        self.assertIn(('papi_cm_adl_quantile', None), exchange.calls)
+        self.assertIn(('papi_position_risk', {}), exchange.calls)
+        self.assertIn(('papi_cm_adl_quantile', {}), exchange.calls)
 
 
 if __name__ == '__main__':
