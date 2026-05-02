@@ -2201,38 +2201,57 @@ def get_subaccount_management_list(exchange):
 
 def get_all_account_positions_list(binance_list):
     df_list = []
-    totalWalletBalance = 0
+    totalWalletBalance = Decimal(0)
     for binance in binance_list:
         exchange = binance['exchange']
-        account_info = exchange.fapiPrivateV2_get_account()
-        positions = [
-            p for p in account_info['positions']
-            if Decimal(p['positionInitialMargin']) > 0
-        ]
-        totalWalletBalance += Decimal(
-            account_info['totalWalletBalance'])  # 钱包保证金余额
+        account = make_binance_account_adapter(
+            exchange, binance.get('account_type', ACCOUNT_TYPE_STANDARD))
+        if account.is_unified:
+            account_info = account.get_account_summary()
+            positions = [
+                p for p in account.get_um_position_risk()
+                if Decimal(str(p.get('positionAmt') or '0')) != 0
+            ]
+            totalWalletBalance += Decimal(
+                str(account_info.get('accountEquity')
+                    or account_info.get('totalWalletBalance') or '0'))
+        else:
+            account_info = account.get_account_summary()['raw']
+            positions = [
+                p for p in account_info['positions']
+                if Decimal(str(p.get('positionInitialMargin') or '0')) > 0
+            ]
+            totalWalletBalance += Decimal(
+                str(account_info['totalWalletBalance']))  # 钱包保证金余额
 
         temp_df = pd.DataFrame(positions)
         df_list.append(temp_df)
 
         items = []
+    if len(df_list) == 0:
+        return {'status': 0, 'msg': '', 'data': {'items': [], 'total': 0}}
     df = pd.concat(df_list, axis=0)
 
     items = []
     if len(df) == 0:
-        return {'status': 0, 'msg': '', 'data': {'items': items}}
+        return {'status': 0, 'msg': '', 'data': {'items': items, 'total': 0}}
 
-    df = df[[
-        'symbol', 'initialMargin', 'unrealizedProfit', 'positionAmt',
-        'leverage', 'notional'
-    ]]
-    df = df.astype({
-        'initialMargin': 'float',
-        'unrealizedProfit': 'float',
-        'positionAmt': 'float',
-        'notional': 'float',
-        'leverage': 'float'
-    })
+    if 'unrealizedProfit' not in df and 'unRealizedProfit' in df:
+        df['unrealizedProfit'] = df['unRealizedProfit']
+    if 'notional' not in df and 'notionalValue' in df:
+        df['notional'] = df['notionalValue']
+    if 'initialMargin' not in df:
+        df['initialMargin'] = 0
+    if 'leverage' not in df:
+        df['leverage'] = 0
+
+    df = df[['symbol', 'initialMargin', 'unrealizedProfit', 'positionAmt',
+             'leverage', 'notional']]
+    for col in [
+            'initialMargin', 'unrealizedProfit', 'positionAmt', 'notional',
+            'leverage'
+    ]:
+        df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
     symbol_info = df.groupby('symbol').agg({
         'initialMargin': 'sum',
         'unrealizedProfit': 'sum',
@@ -2244,10 +2263,13 @@ def get_all_account_positions_list(binance_list):
     # symbol_info['profit_ratio'] = (
     #     (symbol_info['initialMargin'] + symbol_info['unrealizedProfit']) /
     #     symbol_info['initialMargin'] - 1) / symbol_info['leverage']
-    symbol_info['profit_ratio'] = symbol_info['unrealizedProfit'] / abs(
-        symbol_info['notional'] - symbol_info['unrealizedProfit'])
+    symbol_info['profit_ratio'] = 0.0
+    denominator = abs(symbol_info['notional'] - symbol_info['unrealizedProfit'])
+    symbol_info.loc[denominator > 0, 'profit_ratio'] = (
+        symbol_info.loc[denominator > 0, 'unrealizedProfit'] /
+        denominator[denominator > 0])
     symbol_info['leverage_ratio'] = symbol_info['notional'] / float(
-        totalWalletBalance)
+        totalWalletBalance) if totalWalletBalance > 0 else 0
     for i in range(0, len(symbol_info)):
         side = 'BUY' if symbol_info.iloc[i]['positionAmt'] > 0 else 'SELL'
         item = {
@@ -2286,11 +2308,11 @@ def get_all_account_positions_list(binance_list):
 
 
 def get_all_account_balance(binance_list):
-    totalWalletBalance = 0
-    totalUnrealizedProfit = 0
-    totalMarginBalance = 0
-    buy_position = 0
-    sell_position = 0
+    totalWalletBalance = Decimal(0)
+    totalUnrealizedProfit = Decimal(0)
+    totalMarginBalance = Decimal(0)
+    buy_position = Decimal(0)
+    sell_position = Decimal(0)
 
     sub_items = []
     items = []
@@ -2298,25 +2320,46 @@ def get_all_account_balance(binance_list):
     for binance in binance_list:
         exchange = binance['exchange']
 
-        account_info = exchange.fapiPrivateV2_get_account()
-        positions = [
-            p for p in account_info['positions']
-            if Decimal(p['positionInitialMargin']) > 0
-        ]
-
-        subTotalWalletBalance = Decimal(
-            account_info['totalWalletBalance'])  # 钱包保证金余额
-        subTotalUnrealizedProfit = Decimal(
-            account_info['totalUnrealizedProfit'])
-        subTotalMarginBalance = Decimal(account_info['totalMarginBalance'])
+        account = make_binance_account_adapter(
+            exchange, binance.get('account_type', ACCOUNT_TYPE_STANDARD))
+        if account.is_unified:
+            account_info = account.get_account_summary()
+            positions = [
+                p for p in account.get_um_position_risk()
+                if Decimal(str(p.get('positionAmt') or '0')) != 0
+            ]
+            subTotalWalletBalance = Decimal(
+                str(account_info.get('accountEquity')
+                    or account_info.get('totalWalletBalance') or '0'))
+            subTotalUnrealizedProfit = sum(
+                Decimal(
+                    str(p.get('unRealizedProfit')
+                        or p.get('unrealizedProfit') or '0'))
+                for p in positions)
+            subTotalMarginBalance = Decimal(
+                str(account_info.get('accountEquity')
+                    or account_info.get('totalMarginBalance') or '0'))
+        else:
+            account_info = account.get_account_summary()['raw']
+            positions = [
+                p for p in account_info['positions']
+                if Decimal(str(p.get('positionInitialMargin') or '0')) > 0
+            ]
+            subTotalWalletBalance = Decimal(
+                str(account_info['totalWalletBalance']))  # 钱包保证金余额
+            subTotalUnrealizedProfit = Decimal(
+                str(account_info['totalUnrealizedProfit']))
+            subTotalMarginBalance = Decimal(
+                str(account_info['totalMarginBalance']))
         subProfit_ratio = subTotalUnrealizedProfit / subTotalWalletBalance if subTotalWalletBalance > 0 else 0
 
         sub_buy_position = 0
         sub_sell_position = 0
 
         for pos in positions:
-            position_amount = Decimal(pos['positionAmt'])
-            position_usd = Decimal(pos['notional'])
+            position_amount = Decimal(str(pos['positionAmt']))
+            position_usd = Decimal(str(pos.get('notional')
+                                       or pos.get('notionalValue') or '0'))
             if position_amount > 0:
                 sub_buy_position += position_usd
                 buy_position += position_usd
@@ -2346,10 +2389,9 @@ def get_all_account_balance(binance_list):
                 str(round(sub_leverage_ratio, 2))
         })
 
-        totalWalletBalance += Decimal(
-            account_info['totalWalletBalance'])  # 钱包保证金余额
-        totalUnrealizedProfit += Decimal(account_info['totalUnrealizedProfit'])
-        totalMarginBalance += Decimal(account_info['totalMarginBalance'])
+        totalWalletBalance += subTotalWalletBalance
+        totalUnrealizedProfit += subTotalUnrealizedProfit
+        totalMarginBalance += subTotalMarginBalance
 
     leverage_ratio = (buy_position + abs(sell_position)
                       ) / totalWalletBalance if totalWalletBalance > 0 else 0
