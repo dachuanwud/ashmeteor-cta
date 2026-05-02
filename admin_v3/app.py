@@ -340,6 +340,11 @@ def strategy_row():
 def strategy_tpsl_start():
     strategy = request.args.get('strategy')
     exchange = get_exchange(binance_list, strategy)
+    account_type = get_exchange_account_type(binance_list, strategy)
+    if account_type == 'unified':
+        res = make_response({'status': 0, 'msg': '统一账户跳过旧U本位止盈止损监测'})
+        res = decorate_res(res)
+        return res
     if exchange is not None:
         if alpha_tpsl_time.find('m') >= 0:
             scheduler.add_job(id=f'{strategy}_tpsl',
@@ -365,7 +370,7 @@ def strategy_tpsl_start_all():
     for binance in binance_list:
         strategy = binance['strategy']
         exchange = binance['exchange']
-        if strategy in tpsl_blacklist:
+        if strategy in tpsl_blacklist or binance.get('account_type') == 'unified':
             continue
         if alpha_tpsl_time.find('m') >= 0:
             scheduler.add_job(id=f'{strategy}_tpsl',
