@@ -61,9 +61,97 @@ class FakeExchange:
         self.calls.append(('dapi_order', params))
         return {'route': 'dapi', 'params': params}
 
+    def fapiPrivate_post_order(self, params=None):
+        self.calls.append(('fapi_order', params))
+        return {'route': 'fapi', 'params': params}
+
+    def private_post_order(self, params=None):
+        self.calls.append(('spot_order', params))
+        return {'route': 'spot', 'params': params}
+
+    def dapiPrivate_get_openorders(self, params=None):
+        self.calls.append(('dapi_open_orders', params))
+        return [{'route': 'dapi_open_orders', 'params': params}]
+
+    def fapiPrivate_get_openorders(self, params=None):
+        self.calls.append(('fapi_open_orders', params))
+        return [{'route': 'fapi_open_orders', 'params': params}]
+
+    def private_get_openorders(self, params=None):
+        self.calls.append(('spot_open_orders', params))
+        return [{'route': 'spot_open_orders', 'params': params}]
+
+    def dapiPrivate_delete_order(self, params=None):
+        self.calls.append(('dapi_cancel', params))
+        return {'route': 'dapi_cancel', 'params': params}
+
+    def fapiPrivate_delete_order(self, params=None):
+        self.calls.append(('fapi_cancel', params))
+        return {'route': 'fapi_cancel', 'params': params}
+
+    def private_delete_order(self, params=None):
+        self.calls.append(('spot_cancel', params))
+        return {'route': 'spot_cancel', 'params': params}
+
+    def dapiPrivateGetUserTrades(self, params=None):
+        self.calls.append(('dapi_trades', params))
+        return [{'route': 'dapi_trades', 'params': params}]
+
+    def fapiPrivateGetUserTrades(self, params=None):
+        self.calls.append(('fapi_trades', params))
+        return [{'route': 'fapi_trades', 'params': params}]
+
+    def privateGetMyTrades(self, params=None):
+        self.calls.append(('spot_trades', params))
+        return [{'route': 'spot_trades', 'params': params}]
+
     def papiPostCmOrder(self, params=None):
         self.calls.append(('papi_cm_order', params))
         return {'route': 'papi', 'params': params}
+
+    def papiPostUmOrder(self, params=None):
+        self.calls.append(('papi_um_order', params))
+        return {'route': 'papi_um', 'params': params}
+
+    def papiPostMarginOrder(self, params=None):
+        self.calls.append(('papi_margin_order', params))
+        return {'route': 'papi_margin', 'params': params}
+
+    def papiGetCmOpenOrders(self, params=None):
+        self.calls.append(('papi_cm_open_orders', params))
+        return [{'route': 'papi_cm_open_orders', 'params': params}]
+
+    def papiGetUmOpenOrders(self, params=None):
+        self.calls.append(('papi_um_open_orders', params))
+        return [{'route': 'papi_um_open_orders', 'params': params}]
+
+    def papiGetMarginOpenOrders(self, params=None):
+        self.calls.append(('papi_margin_open_orders', params))
+        return [{'route': 'papi_margin_open_orders', 'params': params}]
+
+    def papiDeleteCmOrder(self, params=None):
+        self.calls.append(('papi_cm_cancel', params))
+        return {'route': 'papi_cm_cancel', 'params': params}
+
+    def papiDeleteUmOrder(self, params=None):
+        self.calls.append(('papi_um_cancel', params))
+        return {'route': 'papi_um_cancel', 'params': params}
+
+    def papiDeleteMarginOrder(self, params=None):
+        self.calls.append(('papi_margin_cancel', params))
+        return {'route': 'papi_margin_cancel', 'params': params}
+
+    def papiGetCmUserTrades(self, params=None):
+        self.calls.append(('papi_cm_trades', params))
+        return [{'route': 'papi_cm_trades', 'params': params}]
+
+    def papiGetUmUserTrades(self, params=None):
+        self.calls.append(('papi_um_trades', params))
+        return [{'route': 'papi_um_trades', 'params': params}]
+
+    def papiGetMarginMyTrades(self, params=None):
+        self.calls.append(('papi_margin_trades', params))
+        return [{'route': 'papi_margin_trades', 'params': params}]
 
 
 class BinanceAccountAdapterTest(unittest.TestCase):
@@ -119,6 +207,57 @@ class BinanceAccountAdapterTest(unittest.TestCase):
         self.assertEqual(adl[0]['symbol'], 'ETHUSD_PERP')
         self.assertIn(('papi_position_risk', {}), exchange.calls)
         self.assertIn(('papi_cm_adl_quantile', {}), exchange.calls)
+
+    def test_unified_account_routes_um_and_margin_orders(self):
+        exchange = FakeExchange()
+        adapter = make_binance_account_adapter(exchange, ACCOUNT_TYPE_UNIFIED)
+
+        um_order = adapter.place_um_order({'symbol': 'ETHUSDT'})
+        margin_order = adapter.place_margin_order({
+            'symbol': 'ETHUSDT',
+            'side': 'BUY',
+        })
+
+        self.assertEqual(um_order['route'], 'papi_um')
+        self.assertEqual(margin_order['route'], 'papi_margin')
+        self.assertIn(('papi_um_order', {'symbol': 'ETHUSDT'}), exchange.calls)
+        self.assertIn(('papi_margin_order', {
+            'symbol': 'ETHUSDT',
+            'side': 'BUY',
+        }), exchange.calls)
+
+    def test_unified_account_routes_open_orders_cancel_and_trades_by_market(self):
+        exchange = FakeExchange()
+        adapter = make_binance_account_adapter(exchange, ACCOUNT_TYPE_UNIFIED)
+
+        cm_orders = adapter.get_open_orders('cm', {'symbol': 'ETHUSD_PERP'})
+        um_cancel = adapter.cancel_order('um', {
+            'symbol': 'ETHUSDT',
+            'orderId': 1,
+        })
+        margin_trades = adapter.get_user_trades('margin',
+                                                {'symbol': 'ETHUSDT'})
+
+        self.assertEqual(cm_orders[0]['route'], 'papi_cm_open_orders')
+        self.assertEqual(um_cancel['route'], 'papi_um_cancel')
+        self.assertEqual(margin_trades[0]['route'], 'papi_margin_trades')
+
+    def test_standard_account_routes_um_cm_and_margin_to_legacy_methods(self):
+        exchange = FakeExchange()
+        adapter = make_binance_account_adapter(exchange, ACCOUNT_TYPE_STANDARD)
+
+        um_order = adapter.place_um_order({'symbol': 'ETHUSDT'})
+        margin_order = adapter.place_margin_order({'symbol': 'ETHUSDT'})
+        cm_orders = adapter.get_open_orders('cm', {'symbol': 'ETHUSD_PERP'})
+        um_cancel = adapter.cancel_order('um', {'symbol': 'ETHUSDT'})
+        margin_trades = adapter.get_user_trades('margin',
+                                                {'symbol': 'ETHUSDT'})
+
+        self.assertEqual(um_order['route'], 'fapi')
+        self.assertEqual(margin_order['route'], 'spot')
+        self.assertEqual(cm_orders[0]['route'], 'dapi_open_orders')
+        self.assertEqual(um_cancel['route'], 'fapi_cancel')
+        self.assertEqual(margin_trades[0]['route'], 'spot_trades')
 
 
 if __name__ == '__main__':

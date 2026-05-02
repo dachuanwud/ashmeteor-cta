@@ -86,6 +86,84 @@ class BinanceAccountAdapter:
         return self._call_exchange(
             ('dapiPrivate_post_order', 'dapiPrivatePostOrder'), params=params)
 
+    def place_um_order(self, params):
+        if self.is_unified:
+            return self.exchange.papiPostUmOrder(params=params)
+        return self._call_exchange(
+            ('fapiPrivate_post_order', 'fapiPrivatePostOrder'), params=params)
+
+    def place_margin_order(self, params):
+        if self.is_unified:
+            return self.exchange.papiPostMarginOrder(params=params)
+        return self._call_exchange(
+            ('private_post_order', 'privatePostOrder'), params=params)
+
+    def get_open_orders(self, market_type, params=None):
+        params = params or {}
+        if self.is_unified:
+            if market_type == 'um':
+                return self.exchange.papiGetUmOpenOrders(params=params)
+            if market_type == 'cm':
+                return self.exchange.papiGetCmOpenOrders(params=params)
+            if market_type == 'margin':
+                return self.exchange.papiGetMarginOpenOrders(params=params)
+        if market_type == 'um':
+            return self._call_exchange(
+                ('fapiPrivate_get_openorders', 'fapiPrivateGetOpenOrders'),
+                params=params)
+        if market_type == 'cm':
+            return self._call_exchange(
+                ('dapiPrivate_get_openorders', 'dapiPrivateGetOpenOrders'),
+                params=params)
+        if market_type == 'margin':
+            return self._call_exchange(
+                ('private_get_openorders', 'privateGetOpenOrders'),
+                params=params)
+        raise ValueError(f'unsupported market_type: {market_type}')
+
+    def cancel_order(self, market_type, params):
+        if self.is_unified:
+            if market_type == 'um':
+                return self.exchange.papiDeleteUmOrder(params=params)
+            if market_type == 'cm':
+                return self.exchange.papiDeleteCmOrder(params=params)
+            if market_type == 'margin':
+                return self.exchange.papiDeleteMarginOrder(params=params)
+        if market_type == 'um':
+            return self._call_exchange(
+                ('fapiPrivate_delete_order', 'fapiPrivateDeleteOrder'),
+                params=params)
+        if market_type == 'cm':
+            return self._call_exchange(
+                ('dapiPrivate_delete_order', 'dapiPrivateDeleteOrder'),
+                params=params)
+        if market_type == 'margin':
+            return self._call_exchange(
+                ('private_delete_order', 'privateDeleteOrder'), params=params)
+        raise ValueError(f'unsupported market_type: {market_type}')
+
+    def get_user_trades(self, market_type, params=None):
+        params = params or {}
+        if self.is_unified:
+            if market_type == 'um':
+                return self.exchange.papiGetUmUserTrades(params=params)
+            if market_type == 'cm':
+                return self.exchange.papiGetCmUserTrades(params=params)
+            if market_type == 'margin':
+                return self.exchange.papiGetMarginMyTrades(params=params)
+        if market_type == 'um':
+            return self._call_exchange(
+                ('fapiPrivateGetUserTrades', 'fapiPrivate_get_usertrades'),
+                params=params)
+        if market_type == 'cm':
+            return self._call_exchange(
+                ('dapiPrivateGetUserTrades', 'dapiPrivate_get_usertrades'),
+                params=params)
+        if market_type == 'margin':
+            return self._call_exchange(
+                ('privateGetMyTrades', 'private_get_mytrades'), params=params)
+        raise ValueError(f'unsupported market_type: {market_type}')
+
 
 def make_binance_account_adapter(exchange, account_type=ACCOUNT_TYPE_STANDARD):
     return BinanceAccountAdapter(exchange, account_type)
