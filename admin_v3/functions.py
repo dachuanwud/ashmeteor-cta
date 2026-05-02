@@ -2755,12 +2755,17 @@ def get_dapi_perp_symbol_list(exchange):
 
 
 # 获取币安的ticker数据
+def ticker_last_price_map(tickers):
+    tickers = pd.DataFrame(tickers)
+    tickers['lastPrice'] = pd.to_numeric(tickers['lastPrice'])
+    tickers.set_index('symbol', inplace=True)
+    return tickers.to_dict(orient='dict')['lastPrice']
+
+
 def fetch_binance_ticker_data(exchange, symbol=None):
     if symbol is None:
         tickers = get_fapi_public_ticker_24hr(exchange)
-        tickers = pd.DataFrame(tickers, dtype=float)
-        tickers.set_index('symbol', inplace=True)
-        return tickers.to_dict(orient='dict')['lastPrice']
+        return ticker_last_price_map(tickers)
     else:
         tickers = get_fapi_public_ticker_24hr(exchange, {'symbol': symbol})
         return float(tickers['lastPrice'])
@@ -2770,9 +2775,7 @@ def fetch_binance_ticker_data(exchange, symbol=None):
 def fetch_binance_dapi_ticker_data(exchange, symbol=None):
     if symbol is None:
         tickers = get_dapi_public_ticker_24hr(exchange)
-        tickers = pd.DataFrame(tickers, dtype=float)
-        tickers.set_index('symbol', inplace=True)
-        return tickers.to_dict(orient='dict')['lastPrice']
+        return ticker_last_price_map(tickers)
     else:
         tickers = get_dapi_public_ticker_24hr(exchange, {'symbol': symbol})
         if isinstance(tickers, list):
@@ -5808,7 +5811,6 @@ def spot_account_has_enough_coin(exchange, usd_symbol, coin_num):
 
 
 def dapi_buy_coin_list_and_transfer(exchange, asset_lists, mode, num, balance):
-    from urllib import unquote
     msg = {
         'status': 0,
         'msg': []
