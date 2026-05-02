@@ -6,7 +6,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from functions import (get_account_balance, get_account_margin,
                        get_account_openorders, get_account_positions_list,
-                       get_account_today_orders, get_all_account_balance,
+                       get_account_today_orders,
+                       get_account_management_balance, get_all_account_balance,
                        get_all_account_positions_list, get_dapi_account_balance)
 
 
@@ -31,6 +32,7 @@ class UnifiedDashboardExchange:
         return [{
             'asset': 'USDT',
             'totalWalletBalance': '1200',
+            'umWalletBalance': '1000',
             'cmWalletBalance': '0',
             'cmUnrealizedPNL': '0',
             'umUnrealizedPNL': '12',
@@ -38,6 +40,7 @@ class UnifiedDashboardExchange:
         }, {
             'asset': 'ETH',
             'totalWalletBalance': '2.5',
+            'umWalletBalance': '0',
             'cmWalletBalance': '2',
             'cmUnrealizedPNL': '0.5',
             'umUnrealizedPNL': '0',
@@ -65,6 +68,9 @@ class UnifiedDashboardExchange:
                 'quoteAsset': 'USD',
             }]
         }
+
+    def public_get_ticker_price(self, params=None):
+        return {'symbol': params['symbol'], 'price': '3000'}
 
 
 class UnifiedDashboardAccountTest(unittest.TestCase):
@@ -113,6 +119,19 @@ class UnifiedDashboardAccountTest(unittest.TestCase):
         self.assertEqual(balance['status'], 0)
         self.assertEqual(balance['data']['items'][0]['asset'], 'ETH')
         self.assertEqual(balance['data']['items'][0]['unrealized_profit'], 0.5)
+
+    def test_account_management_balance_accepts_unified_accounts(self):
+        binance_list = [{
+            'strategy': 'admin_v3_unified',
+            'account_type': 'unified',
+            'exchange': self.exchange,
+        }]
+
+        balance = get_account_management_balance(binance_list)
+
+        self.assertEqual(balance['status'], 0)
+        self.assertEqual(balance['data']['items'][0]['account_total'],
+                         '1200.0')
 
 
 if __name__ == '__main__':

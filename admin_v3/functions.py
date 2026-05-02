@@ -712,8 +712,22 @@ def get_spot_account_balance(exchange):
     return spot_wallet_Balance
 
 
-def get_fapi_account_balance(exchange):
+def get_fapi_account_balance(exchange, account_type=ACCOUNT_TYPE_STANDARD):
     fapi_wallet_Balance = 0
+    if account_type == 'unified':
+        account = make_binance_account_adapter(exchange, account_type)
+        for p in account.get_balance_assets():
+            asset_value = float(p.get('umWalletBalance') or 0) + float(
+                p.get('umUnrealizedPNL') or 0)
+            if asset_value != 0.0 and p['asset'] != 'USDT':
+                symbol = p['asset'] + 'USDT'
+                symbol_price = get_symbol_spot_price(exchange, symbol)
+                fapi_wallet_Balance += asset_value * float(
+                    symbol_price['price'])
+            elif asset_value != 0 and p['asset'] == 'USDT':
+                fapi_wallet_Balance += asset_value
+        return fapi_wallet_Balance
+
     fapi_account_info = exchange.fapiPrivateV2_get_account()
     fapi_positions = {}
     for p in fapi_account_info['assets']:
@@ -732,9 +746,10 @@ def get_fapi_account_balance(exchange):
     return fapi_wallet_Balance
 
 
-def get_dapi_total_account_balance(exchange):
+def get_dapi_total_account_balance(exchange, account_type=ACCOUNT_TYPE_STANDARD):
     dapi_wallet_Balance = 0
-    dapi_account_info = exchange.dapiPrivate_get_account()
+    account = make_binance_account_adapter(exchange, account_type)
+    dapi_account_info = account.get_cm_account()
     dapi_positions = {}
     for p in dapi_account_info['assets']:
         dapi_positions[p['asset']] = float(p['walletBalance']) + float(
@@ -810,12 +825,22 @@ def get_account_management_balance(binance_list):
         if exchange is None:
             return {'status': 0, 'msg': '', 'data': {'items': []}}
 
-        fapi_wallet_balance = get_fapi_account_balance(exchange)
-        dapi_wallet_balance = get_dapi_total_account_balance(exchange)
-        spot_wallet_balance = get_spot_account_balance(exchange)
-        saving_wallet_balance = get_saving_account_balance(exchange)
-        fund_wallet_balance = get_fund_account_balance(exchange)
-        account_total = fapi_wallet_balance + dapi_wallet_balance + spot_wallet_balance + fund_wallet_balance + saving_wallet_balance
+        account_type = binance.get('account_type', ACCOUNT_TYPE_STANDARD)
+        fapi_wallet_balance = get_fapi_account_balance(exchange, account_type)
+        dapi_wallet_balance = get_dapi_total_account_balance(exchange,
+                                                             account_type)
+        if account_type == 'unified':
+            spot_wallet_balance = 0
+            saving_wallet_balance = 0
+            fund_wallet_balance = 0
+            summary = make_binance_account_adapter(
+                exchange, account_type).get_account_summary()
+            account_total = float(summary.get('accountEquity', 0))
+        else:
+            spot_wallet_balance = get_spot_account_balance(exchange)
+            saving_wallet_balance = get_saving_account_balance(exchange)
+            fund_wallet_balance = get_fund_account_balance(exchange)
+            account_total = fapi_wallet_balance + dapi_wallet_balance + spot_wallet_balance + fund_wallet_balance + saving_wallet_balance
 
         sub_items.append({
             'strategy_name': binance['strategy'],
