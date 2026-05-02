@@ -7,7 +7,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from functions import (get_account_balance, get_account_margin,
                        get_account_openorders, get_account_positions_list,
                        get_account_today_orders, get_all_account_balance,
-                       get_all_account_positions_list)
+                       get_all_account_positions_list, get_dapi_account_balance)
 
 
 class UnifiedDashboardExchange:
@@ -35,6 +35,13 @@ class UnifiedDashboardExchange:
             'cmUnrealizedPNL': '0',
             'umUnrealizedPNL': '12',
             'totalAvailableBalance': '1100',
+        }, {
+            'asset': 'ETH',
+            'totalWalletBalance': '2.5',
+            'cmWalletBalance': '2',
+            'cmUnrealizedPNL': '0.5',
+            'umUnrealizedPNL': '0',
+            'totalAvailableBalance': '2',
         }]
 
     def papiGetUmUserTrades(self, params=None):
@@ -42,6 +49,22 @@ class UnifiedDashboardExchange:
 
     def papiGetUmOpenOrders(self, params=None):
         return [{'symbol': 'ETHUSDT', 'orderId': '1', 'side': 'BUY'}]
+
+    def papiGetCmPositionRisk(self, params=None):
+        return []
+
+    def dapiPublicGetTicker24hr(self):
+        return [{'symbol': 'ETHUSD_PERP', 'lastPrice': '3000'}]
+
+    def dapiPublicGetExchangeInfo(self):
+        return {
+            'symbols': [{
+                'contractStatus': 'TRADING',
+                'contractType': 'PERPETUAL',
+                'baseAsset': 'ETH',
+                'quoteAsset': 'USD',
+            }]
+        }
 
 
 class UnifiedDashboardAccountTest(unittest.TestCase):
@@ -83,6 +106,13 @@ class UnifiedDashboardAccountTest(unittest.TestCase):
 
         self.assertEqual(openorders['status'], 0)
         self.assertEqual(openorders['data']['items'][0]['symbol'], 'ETHUSDT')
+
+    def test_unified_dapi_balance_normalizes_cm_unrealized_pnl(self):
+        balance = get_dapi_account_balance(self.exchange, 'unified')
+
+        self.assertEqual(balance['status'], 0)
+        self.assertEqual(balance['data']['items'][0]['asset'], 'ETH')
+        self.assertEqual(balance['data']['items'][0]['unrealized_profit'], 0.5)
 
 
 if __name__ == '__main__':

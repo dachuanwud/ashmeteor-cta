@@ -80,6 +80,7 @@ class BinanceAccountAdapter:
                 'asset': item.get('asset', ''),
                 'walletBalance': item.get('walletBalance', '0'),
                 'marginBalance': item.get('marginBalance', '0'),
+                'unrealizedProfit': item.get('cmUnrealizedPNL', '0'),
             })
         return assets
 
