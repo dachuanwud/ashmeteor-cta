@@ -27,6 +27,17 @@ class FakeExchange:
             }],
         }
 
+    def dapiPrivate_get_positionrisk(self, params=None):
+        self.calls.append(('dapi_position_risk', params))
+        return [{
+            'symbol': 'ETHUSD_PERP',
+            'positionAmt': '-10',
+        }]
+
+    def dapiPrivate_get_adlquantile(self, params=None):
+        self.calls.append(('dapi_adl_quantile', params))
+        return [{'symbol': 'ETHUSD_PERP'}]
+
     def papiGetBalance(self):
         self.calls.append(('papi_balance', None))
         return [{
@@ -35,12 +46,16 @@ class FakeExchange:
             'cmUnrealizedPNL': '0.5',
         }]
 
-    def papiGetCmPositionRisk(self):
-        self.calls.append(('papi_position_risk', None))
+    def papiGetCmPositionRisk(self, params=None):
+        self.calls.append(('papi_position_risk', params))
         return [{
             'symbol': 'ETHUSD_PERP',
             'positionAmt': '-10',
         }]
+
+    def papiGetCmAdlQuantile(self, params=None):
+        self.calls.append(('papi_cm_adl_quantile', params))
+        return [{'symbol': 'ETHUSD_PERP'}]
 
     def dapiPrivate_post_order(self, params=None):
         self.calls.append(('dapi_order', params))
@@ -66,6 +81,18 @@ class BinanceAccountAdapterTest(unittest.TestCase):
         self.assertEqual(order['route'], 'dapi')
         self.assertIn(('dapi_account', None), exchange.calls)
 
+    def test_standard_account_uses_dapi_position_risk_and_adl(self):
+        exchange = FakeExchange()
+        adapter = make_binance_account_adapter(exchange, ACCOUNT_TYPE_STANDARD)
+
+        positions = adapter.get_cm_position_risk()
+        adl = adapter.get_cm_adl_quantile()
+
+        self.assertEqual(positions[0]['symbol'], 'ETHUSD_PERP')
+        self.assertEqual(adl[0]['symbol'], 'ETHUSD_PERP')
+        self.assertIn(('dapi_position_risk', None), exchange.calls)
+        self.assertIn(('dapi_adl_quantile', None), exchange.calls)
+
     def test_unified_account_normalizes_papi_balance_and_order(self):
         exchange = FakeExchange()
         adapter = make_binance_account_adapter(exchange, ACCOUNT_TYPE_UNIFIED)
@@ -80,6 +107,18 @@ class BinanceAccountAdapterTest(unittest.TestCase):
         self.assertEqual(order['route'], 'papi')
         self.assertIn(('papi_balance', None), exchange.calls)
         self.assertIn(('papi_position_risk', None), exchange.calls)
+
+    def test_unified_account_uses_papi_cm_position_risk_and_adl(self):
+        exchange = FakeExchange()
+        adapter = make_binance_account_adapter(exchange, ACCOUNT_TYPE_UNIFIED)
+
+        positions = adapter.get_cm_position_risk()
+        adl = adapter.get_cm_adl_quantile()
+
+        self.assertEqual(positions[0]['symbol'], 'ETHUSD_PERP')
+        self.assertEqual(adl[0]['symbol'], 'ETHUSD_PERP')
+        self.assertIn(('papi_position_risk', None), exchange.calls)
+        self.assertIn(('papi_cm_adl_quantile', None), exchange.calls)
 
 
 if __name__ == '__main__':

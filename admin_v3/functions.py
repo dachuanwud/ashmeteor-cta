@@ -7318,7 +7318,10 @@ def cta_usd_delete_after(exchange, trade_info, cta_key):
         log_print(e)
 
 
-def cta_usd_stop_after(exchange, trade_info, cta_key):
+def cta_usd_stop_after(exchange,
+                       trade_info,
+                       cta_key,
+                       account_type=ACCOUNT_TYPE_STANDARD):
     symbol = trade_info['symbol']
     open_price = trade_info['open_price']  # 策略上次开仓价
     init_value = trade_info['init_value']
@@ -7327,6 +7330,7 @@ def cta_usd_stop_after(exchange, trade_info, cta_key):
     position_amount = trade_info['position_amount']  # 策略当前持仓
     price_precision = get_dapi_exchange_info(exchange)  # 下单量精度，价格精度
     last_price = fetch_binance_dapi_ticker_data(exchange, symbol)  # 最新价格
+    account = make_binance_account_adapter(exchange, account_type)
     if open_price is not None and open_price != Decimal(0):
         net_value = ((Decimal(last_price) / open_price - 1) *
                      trade_info['signal'] * trade_ratio + 1) * net_value
@@ -7337,7 +7341,8 @@ def cta_usd_stop_after(exchange, trade_info, cta_key):
     log_print(f'标的{symbol}所需下单张数={order_amount}')
     # 下单并更新数据库
     if cta_usd_open_limit_order(exchange, symbol, order_amount,
-                                price_precision, last_price):
+                                price_precision, last_price,
+                                order_func=account.place_cm_order):
         log_print(f'{cta_key}下单成功')
         send_wechat(f'{cta_key}下单成功')
         data = {
@@ -7358,7 +7363,10 @@ def cta_usd_stop_after(exchange, trade_info, cta_key):
         send_wechat(f'{cta_key}停止策略下单函数执行失败')
 
 
-def cta_usd_tpsl_close_order(exchange, trade_info, cta_key):
+def cta_usd_tpsl_close_order(exchange,
+                             trade_info,
+                             cta_key,
+                             account_type=ACCOUNT_TYPE_STANDARD):
     symbol = trade_info['symbol']
     open_price = trade_info['open_price']  # 策略上次开仓价
     init_value = trade_info['init_value']
@@ -7367,6 +7375,7 @@ def cta_usd_tpsl_close_order(exchange, trade_info, cta_key):
     position_amount = trade_info['position_amount']  # 策略当前持仓
     price_precision = get_dapi_exchange_info(exchange)  # 下单量精度，价格精度
     last_price = fetch_binance_dapi_ticker_data(exchange, symbol)  # 最新价格
+    account = make_binance_account_adapter(exchange, account_type)
     if open_price is not None and open_price != Decimal(0):
         net_value = ((Decimal(last_price) / open_price - 1) *
                      trade_info['signal'] * trade_ratio + 1) * net_value
@@ -7377,7 +7386,8 @@ def cta_usd_tpsl_close_order(exchange, trade_info, cta_key):
     log_print(f'标的{symbol}所需下单张数={order_amount}')
     # 下单并更新数据库
     if cta_usd_open_limit_order(exchange, symbol, order_amount,
-                                price_precision, last_price):
+                                price_precision, last_price,
+                                order_func=account.place_cm_order):
         log_print(f'{cta_key}下单成功')
         send_wechat(f'{cta_key}下单成功')
         data = {

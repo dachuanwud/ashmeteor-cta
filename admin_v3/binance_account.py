@@ -16,6 +16,16 @@ class BinanceAccountAdapter:
         self.exchange = exchange
         self.account_type = normalize_account_type(account_type)
 
+    def _call_exchange(self, method_names, params=None):
+        for name in method_names:
+            if hasattr(self.exchange, name):
+                method = getattr(self.exchange, name)
+                if params is None:
+                    return method()
+                return method(params=params)
+        raise AttributeError(
+            f'exchange does not support any of: {", ".join(method_names)}')
+
     @property
     def is_unified(self):
         return self.account_type == ACCOUNT_TYPE_UNIFIED
@@ -26,11 +36,12 @@ class BinanceAccountAdapter:
                 'assets': self.get_cm_assets(),
                 'positions': self.get_cm_positions(),
             }
-        return self.exchange.dapiPrivate_get_account()
+        return self._call_exchange(
+            ('dapiPrivate_get_account', 'dapiPrivateGetAccount'))
 
     def get_cm_assets(self):
         if not self.is_unified:
-            return self.exchange.dapiPrivate_get_account().get('assets', [])
+            return self.get_cm_account().get('assets', [])
 
         balances = self.exchange.papiGetBalance()
         if isinstance(balances, dict):
@@ -51,12 +62,27 @@ class BinanceAccountAdapter:
     def get_cm_positions(self):
         if self.is_unified:
             return self.exchange.papiGetCmPositionRisk()
-        return self.exchange.dapiPrivate_get_account().get('positions', [])
+        return self.get_cm_account().get('positions', [])
+
+    def get_cm_position_risk(self, params=None):
+        if self.is_unified:
+            return self.exchange.papiGetCmPositionRisk(params=params)
+        return self._call_exchange(
+            ('dapiPrivate_get_positionrisk', 'dapiPrivateGetPositionRisk'),
+            params=params)
+
+    def get_cm_adl_quantile(self, params=None):
+        if self.is_unified:
+            return self.exchange.papiGetCmAdlQuantile(params=params)
+        return self._call_exchange(
+            ('dapiPrivate_get_adlquantile', 'dapiPrivateGetAdlQuantile'),
+            params=params)
 
     def place_cm_order(self, params):
         if self.is_unified:
             return self.exchange.papiPostCmOrder(params=params)
-        return self.exchange.dapiPrivate_post_order(params=params)
+        return self._call_exchange(
+            ('dapiPrivate_post_order', 'dapiPrivatePostOrder'), params=params)
 
 
 def make_binance_account_adapter(exchange, account_type=ACCOUNT_TYPE_STANDARD):

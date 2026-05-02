@@ -372,9 +372,10 @@ def cta_check_position(exchange, params_list, cta_strategy):
         4: 'period',
         5: '策略持仓量'
     }
-    all_strategy_info = pd.DataFrame(data=params_list, dtype=float)
+    all_strategy_info = pd.DataFrame(data=params_list)
     all_strategy_info.rename(columns=columns, inplace=True)
     all_strategy_info = all_strategy_info[['strategy', 'symbol', '策略持仓量']]
+    all_strategy_info['策略持仓量'] = all_strategy_info['策略持仓量'].astype(float)
     strategy_info = all_strategy_info[all_strategy_info['strategy'] ==
                                       cta_strategy]
     strategy_info['策略持仓量'].fillna(0, inplace=True)
@@ -388,7 +389,10 @@ def cta_check_position(exchange, params_list, cta_strategy):
     position_risk = robust(exchange.fapiPrivateV2_get_positionrisk,
                            func_name='fapiPrivateV2_get_positionrisk')
     # 将原始数据转化为dataframe
-    position_risk = pd.DataFrame(position_risk, dtype='float')
+    position_risk = pd.DataFrame(position_risk)
+    if position_risk.empty:
+        position_risk = pd.DataFrame(columns=['symbol', 'positionAmt'])
+    position_risk['positionAmt'] = position_risk['positionAmt'].astype(float)
     # 整理数据
     position_risk.rename(columns={'positionAmt': '当前持仓量'}, inplace=True)
     position_risk = position_risk[position_risk['当前持仓量'] != 0]  # 只保留有仓位的币种
@@ -1009,16 +1013,18 @@ def cta_usd_excute_init(*args):
         interval = args[2]
         cta = args[3]
         period = args[4]
+        account_type = args[5] if len(args) > 5 else ACCOUNT_TYPE_STANDARD
 
         # 初始化获取10000条K线
         symbol_data = dapi_get_kline(exchange, symbol, interval, 10000)
-        cta_key = '_'.join(args[1:])
+        cta_key = '_'.join((symbol, interval, cta, period))
         symbol_data.to_csv(f'{dapi_path}/{cta_key}.csv', index=False)
 
         if interval.find('m') >= 0:  # 添加循环间隔是分钟的子类的定时任务
             scheduler.add_job(id=cta_key,
                               func=cta_usd_excute_period,
-                              args=args,
+                              args=(exchange, symbol, interval, cta, period,
+                                    account_type),
                               trigger='cron',
                               minute='*/' + interval.split('m')[0],
                               misfire_grace_time=300,
@@ -1026,7 +1032,8 @@ def cta_usd_excute_init(*args):
         elif interval.find('h') >= 0:  # 添加循环间隔是小时的子类的定时任务
             scheduler.add_job(id=cta_key,
                               func=cta_usd_excute_period,
-                              args=args,
+                              args=(exchange, symbol, interval, cta, period,
+                                    account_type),
                               trigger='cron',
                               hour='*/' + interval.split('h')[0],
                               misfire_grace_time=300,
@@ -1046,7 +1053,9 @@ def cta_usd_excute_init_all(params_list):
         interval = params[2]
         cta = params[3]
         period = params[4]
-        cta_usd_excute_init(exchange, symbol, interval, cta, period)
+        account_type = params[7] if len(params) > 7 else ACCOUNT_TYPE_STANDARD
+        cta_usd_excute_init(exchange, symbol, interval, cta, period,
+                            account_type)
 
 
 def cta_usd_signal_check_all(*args):
@@ -1069,12 +1078,14 @@ def cta_usd_signal_check_all(*args):
                 continue
 
             exchange = get_exchange(binance_list, strategy)
+            account_type = get_exchange_account_type(binance_list, strategy)
 
             cta_usd_excute_period(exchange,
                                   symbol,
                                   interval,
                                   cta,
                                   period,
+                                  account_type,
                                   pos_infer=config.pos_infer)
 
         # 仓位校准部分
@@ -1087,10 +1098,16 @@ def cta_usd_signal_check_all(*args):
 
         for cta_usd_strategy in cta_usd_strategy_list:
             exchange = get_exchange(binance_list, cta_usd_strategy)
-            cta_usd_check_position(exchange, params_list, cta_usd_strategy)
+            account_type = get_exchange_account_type(binance_list,
+                                                     cta_usd_strategy)
+            cta_usd_check_position(exchange, params_list, cta_usd_strategy,
+                                   account_type)
 
 
-def cta_usd_check_position(exchange, params_list, cta_usd_strategy):
+def cta_usd_check_position(exchange,
+                           params_list,
+                           cta_usd_strategy,
+                           account_type=ACCOUNT_TYPE_STANDARD):
     # 整理策略持仓
     columns = {
         0: 'strategy',
@@ -1100,9 +1117,10 @@ def cta_usd_check_position(exchange, params_list, cta_usd_strategy):
         4: 'period',
         5: '策略持仓量'
     }
-    all_strategy_info = pd.DataFrame(data=params_list, dtype=float)
+    all_strategy_info = pd.DataFrame(data=params_list)
     all_strategy_info.rename(columns=columns, inplace=True)
     all_strategy_info = all_strategy_info[['strategy', 'symbol', '策略持仓量']]
+    all_strategy_info['策略持仓量'] = all_strategy_info['策略持仓量'].astype(float)
     strategy_info = all_strategy_info[all_strategy_info['strategy'] ==
                                       cta_usd_strategy]
     strategy_info['策略持仓量'].fillna(0, inplace=True)
@@ -1113,10 +1131,14 @@ def cta_usd_check_position(exchange, params_list, cta_usd_strategy):
         'symbol')['策略持仓量'].sum()
 
     # 整理当前持仓
-    position_risk = robust(exchange.dapiPrivate_get_positionrisk,
-                           func_name='dapiPrivate_get_positionrisk')
+    account = make_binance_account_adapter(exchange, account_type)
+    position_risk = robust(account.get_cm_position_risk,
+                           func_name='get_cm_position_risk')
     # 将原始数据转化为dataframe
-    position_risk = pd.DataFrame(position_risk, dtype='float')
+    position_risk = pd.DataFrame(position_risk)
+    if position_risk.empty:
+        position_risk = pd.DataFrame(columns=['symbol', 'positionAmt'])
+    position_risk['positionAmt'] = position_risk['positionAmt'].astype(float)
     # 整理数据
     position_risk.rename(columns={'positionAmt': '当前持仓量'}, inplace=True)
     position_risk = position_risk[position_risk['当前持仓量'] != 0]  # 只保留有仓位的币种
@@ -1143,7 +1165,8 @@ def cta_usd_check_position(exchange, params_list, cta_usd_strategy):
         log_print(f'标的{symbol}所需下单量={order_amount}')
         # 下单
         if cta_usd_open_limit_order(exchange, symbol, order_amount,
-                                    price_precision, last_price):
+                                    price_precision, last_price,
+                                    order_func=account.place_cm_order):
             log_print(f'{symbol}仓位校准下单成功')
             send_wechat(f'{symbol}仓位校准下单成功')
         else:
@@ -1158,9 +1181,12 @@ def cta_usd_excute_period(*args, **kwargs):
         interval = args[2]
         cta = args[3]
         period = args[4]
+        account_type = args[5] if len(args) > 5 else ACCOUNT_TYPE_STANDARD
         pos_infer = kwargs.get('pos_infer', False)
+        account = make_binance_account_adapter(exchange, account_type)
+        order_func = account.place_cm_order
 
-        cta_key = '_'.join(args[1:])
+        cta_key = '_'.join((symbol, interval, cta, period))
 
         run_time = datetime.now()
         run_time = run_time.replace(second=0, microsecond=0)
@@ -1228,7 +1254,8 @@ def cta_usd_excute_period(*args, **kwargs):
                 log_print(f'标的{symbol}所需下单张数={order_amount}')
                 # 下单并更新数据库
                 if cta_usd_open_limit_order(exchange, symbol, order_amount,
-                                            price_precision, last_price):
+                                            price_precision, last_price,
+                                            order_func=order_func):
                     log_print(f'{cta_key}下单成功')
                     send_wechat(f'{cta_key}下单成功，signal = {signal}')
                     data = {
@@ -1266,7 +1293,8 @@ def cta_usd_excute_period(*args, **kwargs):
                 log_print(f'标的{symbol}所需下单张数={order_amount}')
                 # 下单并更新数据库
                 if cta_usd_open_limit_order(exchange, symbol, order_amount,
-                                            price_precision, last_price):
+                                            price_precision, last_price,
+                                            order_func=order_func):
                     log_print(f'{cta_key}下单成功')
                     send_wechat(f'{cta_key}下单成功，signal = {signal}')
                     data = {
@@ -1327,7 +1355,8 @@ def cta_usd_excute_period(*args, **kwargs):
                 log_print(f'标的{symbol}所需下单量={order_amount}')
                 # 下单并更新数据库
                 if cta_usd_open_limit_order(exchange, symbol, order_amount,
-                                            price_precision, last_price):
+                                            price_precision, last_price,
+                                            order_func=order_func):
                     log_print(f'{cta_key}下单成功')
                     send_wechat(f'{cta_key}下单成功，signal = {signal}')
                     data = {
@@ -1390,6 +1419,8 @@ def cta_usd_takeprofit_and_stoploss(*args):
 
             strategy_name = trade_info['strategy']
             exchange = get_exchange(binance_list, strategy_name)
+            account_type = get_exchange_account_type(binance_list,
+                                                     strategy_name)
 
             symbol = trade_info['symbol']
             pos_amount = Decimal(trade_info['position_amount'])
@@ -1433,7 +1464,7 @@ def cta_usd_takeprofit_and_stoploss(*args):
                 # )
                 if condition_sl:
                     t1 = cta_usd_tpsl_close_order(exchange, trade_info,
-                                                  cta_key)
+                                                  cta_key, account_type)
                     if t1:
                         log_print(
                             f'{cta_key} {direction}{symbol}已止损，亏损{round(profit_ratio, 4) * 100}%'
@@ -1446,7 +1477,7 @@ def cta_usd_takeprofit_and_stoploss(*args):
                         send_wechat(f'{cta_key} {direction}{symbol}止损失败，请排查')
                 if condition_tp:
                     t1 = cta_usd_tpsl_close_order(exchange, trade_info,
-                                                  cta_key)
+                                                  cta_key, account_type)
                     if t1:
                         log_print(
                             f'{cta_key} {direction}{symbol}已止盈，盈利{round(profit_ratio, 4) * 100}%'
@@ -1465,7 +1496,7 @@ def cta_usd_takeprofit_and_stoploss(*args):
                 # )
                 if condition_sl:
                     t1 = cta_usd_tpsl_close_order(exchange, trade_info,
-                                                  cta_key)
+                                                  cta_key, account_type)
                     if t1:
                         log_print(
                             f'{cta_key} {direction}{symbol}已止损，亏损{round(profit_ratio, 4) * 100}%'
@@ -1478,7 +1509,7 @@ def cta_usd_takeprofit_and_stoploss(*args):
                         send_wechat(f'{cta_key} {direction}{symbol}止损失败，请排查')
                 if condition_tp:
                     t1 = cta_usd_tpsl_close_order(exchange, trade_info,
-                                                  cta_key)
+                                                  cta_key, account_type)
                     if t1:
                         log_print(
                             f'{cta_key} {direction}{symbol}已止盈，盈利{round(profit_ratio, 4) * 100}%'
@@ -1509,13 +1540,15 @@ def cta_usd_adl_handle(*args):
     for binance in args:
         exchange = binance['exchange']
         strategy = binance['strategy']
-        account_info = exchange.dapiPrivate_get_account()
+        account_type = binance.get('account_type', ACCOUNT_TYPE_STANDARD)
+        account = make_binance_account_adapter(exchange, account_type)
+        account_info = account.get_cm_account()
         positions = account_info['positions']
         positions = [p for p in positions if float(p['positionAmt']) != 0]
         if len(positions) == 0:
             continue
         price_precision = get_dapi_exchange_info(exchange)
-        adl_list = exchange.dapiPrivate_get_adlquantile()
+        adl_list = account.get_cm_adl_quantile()
         for adl in adl_list:
             adl_level = int(adl['adlQuantile']['BOTH'])
             if adl_level < 4:
@@ -1535,15 +1568,19 @@ def cta_usd_adl_handle(*args):
                     # 持仓张数大于0，先sell后buy
                     if quantity > 0:
                         cta_usd_open_limit_order(exchange, symbol, -qty,
-                                                 price_precision, last_price)
+                                                 price_precision, last_price,
+                                                 order_func=account.place_cm_order)
                         cta_usd_open_limit_order(exchange, symbol, qty,
-                                                 price_precision, last_price)
+                                                 price_precision, last_price,
+                                                 order_func=account.place_cm_order)
                     # 持仓张数小于0，先buy后sell
                     else:
                         cta_usd_open_limit_order(exchange, symbol, qty,
-                                                 price_precision, last_price)
+                                                 price_precision, last_price,
+                                                 order_func=account.place_cm_order)
                         cta_usd_open_limit_order(exchange, symbol, -qty,
-                                                 price_precision, last_price)
+                                                 price_precision, last_price,
+                                                 order_func=account.place_cm_order)
 
                     log_print(f'{strategy} {symbol} ADL处理成功，处理{qty}张')
                     send_wechat(f'{strategy} {symbol} ADL处理成功，处理{qty}张')

@@ -1092,8 +1092,9 @@ def cta_usd_start():
         return res
 
     exchange = get_exchange(binance_list, strategy)
+    account_type = get_exchange_account_type(binance_list, strategy)
     excutor.submit(cta_usd_excute_init, exchange, symbol, interval, cta,
-                   period)
+                   period, account_type)
     res = make_response(jsonify({'status': 0, 'msg': ''}))
     res = decorate_res(res)
     return res
@@ -1109,7 +1110,10 @@ def cta_usd_stop():
         log_print(f'{cta_key}定时器已被移除')
     trade_info = cta_usd_get_trade_info(cta_key)
     exchange = get_exchange(binance_list, trade_info['strategy'])
-    cta_usd_stop_after(exchange, trade_info, cta_key)  # is_running状态在函数内改变了
+    account_type = get_exchange_account_type(binance_list,
+                                             trade_info['strategy'])
+    cta_usd_stop_after(exchange, trade_info, cta_key,
+                       account_type)  # is_running状态在函数内改变了
     res = make_response(jsonify({'status': 0, 'msg': ''}))
     res = decorate_res(res)
     return res
@@ -1144,7 +1148,9 @@ def cta_usd_start_all():
     for params in params_list:
         strategy = params[0]
         exchange = get_exchange(binance_list, strategy)
+        account_type = get_exchange_account_type(binance_list, strategy)
         params[0] = exchange
+        params.append(account_type)
     excutor.submit(cta_usd_excute_init_all, params_list)
     res = make_response(jsonify({'status': 0, 'msg': ''}))
     res = decorate_res(res)
@@ -1162,8 +1168,10 @@ def cta_usd_stop_all():
             log_print(f'{cta_key}定时器已被移除')
         trade_info = cta_usd_get_trade_info(cta_key)
         exchange = get_exchange(binance_list, trade_info['strategy'])
+        account_type = get_exchange_account_type(binance_list,
+                                                 trade_info['strategy'])
         cta_usd_stop_after(exchange, trade_info,
-                           cta_key)  # is_running状态在函数内改变了
+                           cta_key, account_type)  # is_running状态在函数内改变了
     res = make_response(jsonify({'status': 0, 'msg': ''}))
     res = decorate_res(res)
     return res
