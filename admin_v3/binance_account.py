@@ -30,6 +30,37 @@ class BinanceAccountAdapter:
     def is_unified(self):
         return self.account_type == ACCOUNT_TYPE_UNIFIED
 
+    def get_account_summary(self):
+        if self.is_unified:
+            return self.exchange.papiGetAccount()
+        account = self._call_exchange(
+            ('fapiPrivateV2_get_account', 'fapiPrivateV2GetAccount'))
+        return {
+            'accountStatus': 'NORMAL',
+            'accountEquity': account.get('totalMarginBalance', '0'),
+            'totalAvailableBalance': account.get('availableBalance', '0'),
+            'raw': account,
+        }
+
+    def get_balance_assets(self):
+        if not self.is_unified:
+            return self.get_account_summary().get('raw', {}).get('assets', [])
+
+        balances = self.exchange.papiGetBalance()
+        if isinstance(balances, dict):
+            balances = [balances]
+
+        assets = []
+        for item in balances:
+            cm_wallet = Decimal(str(item.get('cmWalletBalance') or '0'))
+            cm_pnl = Decimal(str(item.get('cmUnrealizedPNL') or '0'))
+            margin_balance = cm_wallet + cm_pnl
+            normalized = dict(item)
+            normalized['walletBalance'] = str(cm_wallet)
+            normalized['marginBalance'] = str(margin_balance)
+            assets.append(normalized)
+        return assets
+
     def get_cm_account(self):
         if self.is_unified:
             return {
@@ -43,19 +74,12 @@ class BinanceAccountAdapter:
         if not self.is_unified:
             return self.get_cm_account().get('assets', [])
 
-        balances = self.exchange.papiGetBalance()
-        if isinstance(balances, dict):
-            balances = [balances]
-
         assets = []
-        for item in balances:
-            cm_wallet = Decimal(str(item.get('cmWalletBalance') or '0'))
-            cm_pnl = Decimal(str(item.get('cmUnrealizedPNL') or '0'))
-            margin_balance = cm_wallet + cm_pnl
+        for item in self.get_balance_assets():
             assets.append({
                 'asset': item.get('asset', ''),
-                'walletBalance': str(cm_wallet),
-                'marginBalance': str(margin_balance),
+                'walletBalance': item.get('walletBalance', '0'),
+                'marginBalance': item.get('marginBalance', '0'),
             })
         return assets
 
@@ -70,6 +94,14 @@ class BinanceAccountAdapter:
             return self.exchange.papiGetCmPositionRisk(params=params)
         return self._call_exchange(
             ('dapiPrivate_get_positionrisk', 'dapiPrivateGetPositionRisk'),
+            params=params)
+
+    def get_um_position_risk(self, params=None):
+        params = params or {}
+        if self.is_unified:
+            return self.exchange.papiGetUmPositionRisk(params=params)
+        return self._call_exchange(
+            ('fapiPrivateV2_get_positionrisk', 'fapiPrivateV2GetPositionRisk'),
             params=params)
 
     def get_cm_adl_quantile(self, params=None):

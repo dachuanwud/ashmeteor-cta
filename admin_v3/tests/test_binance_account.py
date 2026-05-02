@@ -42,8 +42,41 @@ class FakeExchange:
         self.calls.append(('papi_balance', None))
         return [{
             'asset': 'ETH',
+            'totalWalletBalance': '2.2',
+            'umWalletBalance': '0.2',
+            'umUnrealizedPNL': '0.1',
             'cmWalletBalance': '2',
             'cmUnrealizedPNL': '0.5',
+        }]
+
+    def papiGetAccount(self):
+        self.calls.append(('papi_account', None))
+        return {
+            'accountStatus': 'NORMAL',
+            'accountEquity': '1000',
+            'totalAvailableBalance': '900',
+        }
+
+    def fapiPrivateV2_get_account(self):
+        self.calls.append(('fapi_account', None))
+        return {
+            'totalMarginBalance': '100',
+            'availableBalance': '90',
+            'positions': [],
+        }
+
+    def papiGetUmPositionRisk(self, params=None):
+        self.calls.append(('papi_um_position_risk', params))
+        return [{
+            'symbol': 'ETHUSDT',
+            'positionAmt': '0.1',
+        }]
+
+    def fapiPrivateV2_get_positionrisk(self, params=None):
+        self.calls.append(('fapi_position_risk', params))
+        return [{
+            'symbol': 'ETHUSDT',
+            'positionAmt': '0.1',
         }]
 
     def papiGetCmPositionRisk(self, params=None):
@@ -207,6 +240,36 @@ class BinanceAccountAdapterTest(unittest.TestCase):
         self.assertEqual(adl[0]['symbol'], 'ETHUSD_PERP')
         self.assertIn(('papi_position_risk', {}), exchange.calls)
         self.assertIn(('papi_cm_adl_quantile', {}), exchange.calls)
+
+    def test_unified_account_reads_account_summary_balance_and_um_positions(self):
+        exchange = FakeExchange()
+        adapter = make_binance_account_adapter(exchange, ACCOUNT_TYPE_UNIFIED)
+
+        summary = adapter.get_account_summary()
+        balances = adapter.get_balance_assets()
+        positions = adapter.get_um_position_risk()
+
+        self.assertEqual(summary['accountStatus'], 'NORMAL')
+        self.assertEqual(balances[0]['totalWalletBalance'], '2.2')
+        self.assertEqual(balances[0]['marginBalance'], '2.5')
+        self.assertEqual(positions[0]['symbol'], 'ETHUSDT')
+        self.assertIn(('papi_account', None), exchange.calls)
+        self.assertIn(('papi_balance', None), exchange.calls)
+        self.assertIn(('papi_um_position_risk', {}), exchange.calls)
+
+    def test_standard_account_reads_legacy_summary_and_um_positions(self):
+        exchange = FakeExchange()
+        adapter = make_binance_account_adapter(exchange, ACCOUNT_TYPE_STANDARD)
+
+        summary = adapter.get_account_summary()
+        positions = adapter.get_um_position_risk()
+
+        self.assertEqual(summary['accountStatus'], 'NORMAL')
+        self.assertEqual(summary['accountEquity'], '100')
+        self.assertEqual(summary['totalAvailableBalance'], '90')
+        self.assertEqual(positions[0]['symbol'], 'ETHUSDT')
+        self.assertIn(('fapi_account', None), exchange.calls)
+        self.assertIn(('fapi_position_risk', {}), exchange.calls)
 
     def test_unified_account_routes_um_and_margin_orders(self):
         exchange = FakeExchange()
