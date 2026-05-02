@@ -52,9 +52,9 @@
 **Files:**
 - Git repository and remote server.
 
-- [ ] Commit all Admin v3 design and implementation files while leaving unrelated `crypto_cta` changes unstaged.
-- [ ] Push `main` to GitHub.
-- [ ] Pull `main` on `43.163.203.195`.
-- [ ] Apply `ALTER TABLE strategy ADD COLUMN account_type ...` only if the column is missing.
-- [ ] Restart `admin_v3.service`.
-- [ ] Verify service status and `/` health.
+- [x] Commit all Admin v3 design and implementation files while leaving unrelated `crypto_cta` changes unstaged.
+- [x] Push `main` to GitHub.
+- [x] Pull `main` on `43.163.203.195`.
+- [x] Apply `ALTER TABLE strategy ADD COLUMN account_type ...` only if the column is missing.
+- [x] Restart `admin_v3.service`.
+- [x] Verify service status and `/` health.
