@@ -408,8 +408,24 @@ def mtmbbw_bolling_core(df, n):
     return dedupe_signal(df)
 
 
+def dc_flash_ma_windows(n, holding_times_min=10):
+    step = int(n / 50) * 10
+    windows = []
+    holding_times = 0
+    while True:
+        if step == 0:
+            ma_temp = max(n, holding_times_min)
+        else:
+            ma_temp = max(n - step * holding_times, holding_times_min)
+        if ma_temp not in windows:
+            windows.append(ma_temp)
+        if step == 0 or ma_temp == holding_times_min:
+            break
+        holding_times += 1
+    return windows
+
+
 def dc_flash_core(df, n):
-    ma_dict = {}
     stop_loss_pct = 10
     holding_times_min = 10
     df["signal"] = np.nan
@@ -424,61 +440,74 @@ def dc_flash_core(df, n):
     df.loc[(df["close"] < df["lower"]) & (df["mtm"] < 0) & (df["close"].shift(1) >= df["lower"].shift(1)), "signal_short"] = -1
     df.loc[(df["close"] > df["median"]) & (df["close"].shift(1) <= df["median"].shift(1)), "signal_short"] = 0
 
+    close_values = df["close"].to_numpy()
+    atr_values = df["atr"].to_numpy()
+    signal_values = df["signal"].to_numpy(copy=True)
+    signal_long_values = df["signal_long"].to_numpy(copy=True)
+    signal_short_values = df["signal_short"].to_numpy(copy=True)
+    flash_stop_win_values = df["flash_stop_win"].to_numpy(copy=True)
+    ma_cache = {
+        ma_temp: df["close"].rolling(ma_temp, min_periods=1).mean().to_numpy()
+        for ma_temp in dc_flash_ma_windows(n, holding_times_min)
+    }
+
     info = {"pre_signal": 0, "stop_lose_price": None, "holding_times": 0, "stop_win_times": 0, "stop_win_price": 0}
     for i in range(df.shape[0]):
         if info["pre_signal"] == 0:
-            if df.at[i, "signal_long"] == 1:
-                df.at[i, "signal"] = 1
-                info = {"pre_signal": 1, "stop_lose_price": df.at[i, "close"] * (1 - stop_loss_pct / 100), "holding_times": 0, "stop_win_times": 0, "stop_win_price": 0}
-            elif df.at[i, "signal_short"] == -1:
-                df.at[i, "signal"] = -1
-                info = {"pre_signal": -1, "stop_lose_price": df.at[i, "close"] * (1 + stop_loss_pct / 100), "holding_times": 0, "stop_win_times": 0, "stop_win_price": 0}
+            if signal_long_values[i] == 1:
+                signal_values[i] = 1
+                info = {"pre_signal": 1, "stop_lose_price": close_values[i] * (1 - stop_loss_pct / 100), "holding_times": 0, "stop_win_times": 0, "stop_win_price": 0}
+            elif signal_short_values[i] == -1:
+                signal_values[i] = -1
+                info = {"pre_signal": -1, "stop_lose_price": close_values[i] * (1 + stop_loss_pct / 100), "holding_times": 0, "stop_win_times": 0, "stop_win_price": 0}
             else:
                 info = {"pre_signal": 0, "stop_lose_price": None, "holding_times": 0, "stop_win_times": 0, "stop_win_price": 0}
         elif info["pre_signal"] == 1:
             holding_times = info["holding_times"]
-            if df.at[i, "atr"] < df.at[i - 1, "atr"]:
+            if atr_values[i] < atr_values[i - 1]:
                 info["holding_times"] = holding_times + 1
-            if df.at[i, "close"] > df.at[i - 1, "close"]:
+            if close_values[i] > close_values[i - 1]:
                 info["holding_times"] = max(holding_times - 1, 0)
             ma_temp = max(n - int(n / 50) * 10 * info["holding_times"], holding_times_min)
-            ma_dict.setdefault(ma_temp, df["close"].rolling(ma_temp, min_periods=1).mean())
-            df.at[i, "flash_stop_win"] = ma_dict[ma_temp].at[i]
-            if df.at[i, "close"] < df.at[i, "flash_stop_win"]:
-                if df.at[i, "close"] > info["stop_win_price"] or info["stop_win_times"] == 0:
-                    info["stop_win_price"] = df.at[i, "close"]
+            flash_stop_win_values[i] = ma_cache[ma_temp][i]
+            if close_values[i] < flash_stop_win_values[i]:
+                if close_values[i] > info["stop_win_price"] or info["stop_win_times"] == 0:
+                    info["stop_win_price"] = close_values[i]
                     info["stop_win_times"] += 1
                     info["holding_times"] = 0
                 else:
-                    df.at[i, "signal_long"] = 0
-            if df.at[i, "signal_long"] == 0 or df.at[i, "close"] < info["stop_lose_price"]:
-                df.at[i, "signal"] = 0
+                    signal_long_values[i] = 0
+            if signal_long_values[i] == 0 or close_values[i] < info["stop_lose_price"]:
+                signal_values[i] = 0
                 info = {"pre_signal": 0, "stop_lose_price": None, "holding_times": 0, "stop_win_times": 0, "stop_win_price": 0}
-            if df.at[i, "signal_short"] == -1:
-                df.at[i, "signal"] = -1
-                info = {"pre_signal": -1, "stop_lose_price": df.at[i, "close"] * (1 + stop_loss_pct / 100), "holding_times": 0, "stop_win_times": 0, "stop_win_price": 0}
+            if signal_short_values[i] == -1:
+                signal_values[i] = -1
+                info = {"pre_signal": -1, "stop_lose_price": close_values[i] * (1 + stop_loss_pct / 100), "holding_times": 0, "stop_win_times": 0, "stop_win_price": 0}
         elif info["pre_signal"] == -1:
             holding_times = info["holding_times"]
-            if df.at[i, "atr"] < df.at[i - 1, "atr"]:
+            if atr_values[i] < atr_values[i - 1]:
                 info["holding_times"] = holding_times + 1
-            if df.at[i, "close"] < df.at[i - 1, "close"]:
+            if close_values[i] < close_values[i - 1]:
                 info["holding_times"] = max(holding_times - 1, 0)
             ma_temp = max(n - int(n / 50) * 10 * info["holding_times"], holding_times_min)
-            ma_dict.setdefault(ma_temp, df["close"].rolling(ma_temp, min_periods=1).mean())
-            df.at[i, "flash_stop_win"] = ma_dict[ma_temp].at[i]
-            if df.at[i, "close"] > df.at[i, "flash_stop_win"]:
-                if df.at[i, "close"] < info["stop_win_price"] or info["stop_win_times"] == 0:
-                    info["stop_win_price"] = df.at[i, "close"]
+            flash_stop_win_values[i] = ma_cache[ma_temp][i]
+            if close_values[i] > flash_stop_win_values[i]:
+                if close_values[i] < info["stop_win_price"] or info["stop_win_times"] == 0:
+                    info["stop_win_price"] = close_values[i]
                     info["stop_win_times"] += 1
                     info["holding_times"] = 0
                 else:
-                    df.at[i, "signal_short"] = 0
-            if df.at[i, "signal_short"] == 0 or df.at[i, "close"] > info["stop_lose_price"]:
-                df.at[i, "signal"] = 0
+                    signal_short_values[i] = 0
+            if signal_short_values[i] == 0 or close_values[i] > info["stop_lose_price"]:
+                signal_values[i] = 0
                 info = {"pre_signal": 0, "stop_lose_price": None, "holding_times": 0, "stop_win_times": 0, "stop_win_price": 0}
-            if df.at[i, "signal_long"] == 1:
-                df.at[i, "signal"] = 1
-                info = {"pre_signal": 1, "stop_lose_price": df.at[i, "close"] * (1 - stop_loss_pct / 100), "holding_times": 0, "stop_win_times": 0, "stop_win_price": 0}
+            if signal_long_values[i] == 1:
+                signal_values[i] = 1
+                info = {"pre_signal": 1, "stop_lose_price": close_values[i] * (1 - stop_loss_pct / 100), "holding_times": 0, "stop_win_times": 0, "stop_win_price": 0}
+    df["signal"] = signal_values
+    df["signal_long"] = signal_long_values
+    df["signal_short"] = signal_short_values
+    df["flash_stop_win"] = flash_stop_win_values
     return df
 
 

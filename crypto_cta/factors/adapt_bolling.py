@@ -6,5 +6,5 @@ def signal(df, para=[55], proportion=1, leverage_rate=1):
     return finish_signal(df, proportion, leverage_rate)
 
 
-def para_list(n_list=range(10, 300, 10)):
+def para_list(n_list=range(10, 1000 + 10, 10)):
     return default_para_list(n_list)

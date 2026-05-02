@@ -1,8 +1,9 @@
 import glob
 import inspect
+import ast
 
 import numpy as np
-from cta_api.tools import get_list_dimension
+from cta_api.tools import get_parameter_dimension
 from config import *
 from cta_api.evaluate import *
 from cta_api.function import write_file, num_to_pct
@@ -13,7 +14,7 @@ pd.set_option('expand_frame_repr', False)  # 当列太多时不换行
 for signal_name in signal_name_list:
     cls = __import__('factors.%s' % signal_name, fromlist=('',))
     para_list = cls.para_list()
-    dim = get_list_dimension(para_list)
+    dim = get_parameter_dimension(para_list)
     for symbol in symbol_list:
         for rule_type in rule_type_list:
             # === 获取所有指定策略的遍历结果
@@ -55,7 +56,9 @@ for signal_name in signal_name_list:
             if dim == 1:
                 if not all_symbol_rtn.empty:
                     print('绘制参数平原')
-                    draw_equity_parameters_plateau(all_symbol_rtn,draw_chart_list,show=False,path=os.path.join(root_path,f'data/output/para_pic/{signal_name}_{symbol}_{rule_type}_{per_eva}.html'))
+                    draw_rtn = all_symbol_rtn.copy()
+                    draw_rtn['para'] = draw_rtn['para'].apply(lambda x: ast.literal_eval(x)[0] if isinstance(x, str) and x.startswith('[') else x)
+                    draw_equity_parameters_plateau(draw_rtn,draw_chart_list,show=False,path=os.path.join(root_path,f'data/output/para_pic/{signal_name}_{symbol}_{rule_type}_{per_eva}.html'))
 
             if dim == 2:
                 if not all_symbol_rtn.empty:

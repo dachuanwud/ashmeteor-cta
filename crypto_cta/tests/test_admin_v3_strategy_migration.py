@@ -64,6 +64,15 @@ class AdminV3StrategyMigrationTest(unittest.TestCase):
         self.assertIn("signal", result.columns)
         self.assertGreaterEqual(len(mtm_bolling.para_list()), 1)
 
+    def test_adapt_bolling_parameter_sweep_covers_10_to_1000(self):
+        from factors import adapt_bolling
+
+        para_list = adapt_bolling.para_list()
+
+        self.assertEqual(para_list[0], [10])
+        self.assertEqual(para_list[-1], [1000])
+        self.assertEqual(len(para_list), 100)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -5,6 +5,11 @@ __pycache__/
 *.py[cod]
 admin_v3/data/
 
+# Charts, reports, tabular outputs, and serialized data (large / generated)
+*.html
+*.pkl
+*.csv
+
 # Local IDE metadata
 .idea/
 

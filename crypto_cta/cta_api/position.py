@@ -12,13 +12,13 @@ def position_for_future(df):
     # ===由signal计算出实际的每天持有仓位
     df['signal_'] = df['signal']
     # 在产生signal的k线结束的时候，进行买入
-    df['signal_'].fillna(method='ffill', inplace=True)
-    df['signal_'].fillna(value=0, inplace=True)  # 将初始行数的signal补全为0
+    df['signal_'] = df['signal_'].ffill()
+    df['signal_'] = df['signal_'].fillna(value=0)  # 将初始行数的signal补全为0
     df['pos'] = df['signal_'].shift()
-    df['pos'].fillna(value=0, inplace=True)  # 将初始行数的pos补全为0
+    df['pos'] = df['pos'].fillna(value=0)  # 将初始行数的pos补全为0
 
     # pos为空的时，不能买卖，只能和前一周期保持一致。
-    df['pos'].fillna(method='ffill', inplace=True)
+    df['pos'] = df['pos'].ffill()
 
     # 在实际操作中，不一定会直接跳过4点这个周期，而是会停止N分钟下单。此时可以注释掉上面的代码。
 
