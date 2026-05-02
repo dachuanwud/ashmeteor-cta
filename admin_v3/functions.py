@@ -438,31 +438,43 @@ def change_positionside_dual(exchange, type):
         return {'status': -1, 'msg': f'修改单向持仓模式失败 {e}'}
 
 
-def get_account_positions_list(exchange):
+def get_account_positions_list(exchange, account_type=ACCOUNT_TYPE_STANDARD):
     if exchange is None:
         return {'status': 0, 'msg': '', 'data': {'items': []}}
-    account_info = exchange.fapiPrivateV2_get_account()
-    positions = [
-        p for p in account_info['positions']
-        if Decimal(p['positionInitialMargin']) > 0
-    ]
-    totalWalletBalance = Decimal(account_info['totalWalletBalance'])  # 钱包保证金余额
+    account = make_binance_account_adapter(exchange, account_type)
+    if account.is_unified:
+        account_info = account.get_account_summary()
+        positions = [
+            p for p in account.get_um_position_risk()
+            if Decimal(str(p.get('positionAmt') or '0')) != 0
+        ]
+        totalWalletBalance = Decimal(
+            str(account_info.get('accountEquity')
+                or account_info.get('totalWalletBalance') or '0'))
+    else:
+        account_info = account.get_account_summary()['raw']
+        positions = [
+            p for p in account_info['positions']
+            if Decimal(str(p.get('positionInitialMargin') or '0')) > 0
+        ]
+        totalWalletBalance = Decimal(
+            str(account_info['totalWalletBalance']))  # 钱包保证金余额
 
     items = []
 
     for pos in positions:
         symbol = pos['symbol']
-        position_side = pos['positionSide']
-        margin = Decimal(pos['initialMargin'])
-        profit = Decimal(pos['unrealizedProfit'])
-        position_amount = Decimal(pos['positionAmt'])
-        entry_price = Decimal(pos['entryPrice'])
-        leverage = Decimal(pos['leverage'])
-        position_usd = Decimal(pos['notional'])
+        profit = Decimal(str(pos.get('unRealizedProfit')
+                             or pos.get('unrealizedProfit') or '0'))
+        position_amount = Decimal(str(pos['positionAmt']))
+        entry_price = Decimal(str(pos.get('entryPrice') or '0'))
+        position_usd = Decimal(str(pos.get('notional')
+                                   or pos.get('notionalValue') or '0'))
         leverage_ratio = position_usd / totalWalletBalance if totalWalletBalance > 0 else 0
 
         # profit_ratio = ((margin + profit) / margin - 1) / leverage
-        profit_ratio = profit / abs(position_usd - profit)
+        denominator = abs(position_usd - profit)
+        profit_ratio = profit / denominator if denominator > 0 else 0
         side = 'SELL' if position_amount < 0 else 'BUY'
 
         item = {
@@ -565,25 +577,46 @@ def get_deribit_account_positions_list(exchange):
     }
 
 
-def get_account_balance(exchange):
+def get_account_balance(exchange, account_type=ACCOUNT_TYPE_STANDARD):
     if exchange is None:
         return {'status': 0, 'msg': '', 'data': {'items': []}}
-    account_info = exchange.fapiPrivateV2_get_account()
-    positions = [
-        p for p in account_info['positions']
-        if Decimal(p['positionInitialMargin']) > 0
-    ]
-    totalWalletBalance = Decimal(account_info['totalWalletBalance'])  # 钱包保证金余额
-    totalUnrealizedProfit = Decimal(account_info['totalUnrealizedProfit'])
-    totalMarginBalance = Decimal(account_info['totalMarginBalance'])
+    account = make_binance_account_adapter(exchange, account_type)
+    if account.is_unified:
+        account_info = account.get_account_summary()
+        positions = [
+            p for p in account.get_um_position_risk()
+            if Decimal(str(p.get('positionAmt') or '0')) != 0
+        ]
+        totalWalletBalance = Decimal(
+            str(account_info.get('accountEquity')
+                or account_info.get('totalWalletBalance') or '0'))
+        totalUnrealizedProfit = sum(
+            Decimal(str(p.get('unRealizedProfit')
+                        or p.get('unrealizedProfit') or '0'))
+            for p in positions)
+        totalMarginBalance = Decimal(
+            str(account_info.get('accountEquity')
+                or account_info.get('totalMarginBalance') or '0'))
+    else:
+        account_info = account.get_account_summary()['raw']
+        positions = [
+            p for p in account_info['positions']
+            if Decimal(str(p.get('positionInitialMargin') or '0')) > 0
+        ]
+        totalWalletBalance = Decimal(
+            str(account_info['totalWalletBalance']))  # 钱包保证金余额
+        totalUnrealizedProfit = Decimal(
+            str(account_info['totalUnrealizedProfit']))
+        totalMarginBalance = Decimal(str(account_info['totalMarginBalance']))
     profit_ratio = totalUnrealizedProfit / totalWalletBalance if totalWalletBalance > 0 else 0
 
     buy_position = 0
     sell_position = 0
 
     for pos in positions:
-        position_amount = Decimal(pos['positionAmt'])
-        position_usd = Decimal(pos['notional'])
+        position_amount = Decimal(str(pos['positionAmt']))
+        position_usd = Decimal(str(pos.get('notional')
+                                   or pos.get('notionalValue') or '0'))
         if position_amount > 0:
             buy_position += position_usd
         else:
@@ -611,22 +644,37 @@ def get_account_balance(exchange):
     }
 
 
-def get_account_margin(exchange):
+def get_account_margin(exchange, account_type=ACCOUNT_TYPE_STANDARD):
     if exchange is None:
         return {'status': 0, 'msg': '', 'data': {'items': []}}
-    account_info = exchange.fapiPrivateV2_get_account()
+    account = make_binance_account_adapter(exchange, account_type)
+    assets = account.get_balance_assets()
     assets = [
-        p for p in account_info['assets']
-        if Decimal(p['updateTime']) > 0 or Decimal(p['marginBalance']) != 0
+        p for p in assets
+        if Decimal(str(p.get('updateTime') or '0')) > 0
+        or Decimal(str(p.get('marginBalance') or '0')) != 0
+        or Decimal(str(p.get('walletBalance') or '0')) != 0
+        or Decimal(str(p.get('totalWalletBalance') or '0')) != 0
+        or Decimal(str(p.get('umWalletBalance') or '0')) != 0
     ]
 
     items = []
     for asset_dict in assets:
         asset = asset_dict['asset']
-        walletBalance = Decimal(asset_dict['walletBalance'])
-        unrealizedProfit = Decimal(asset_dict['unrealizedProfit'])
-        marginBalance = Decimal(asset_dict['marginBalance'])
-        maxWithdrawAmount = Decimal(asset_dict['maxWithdrawAmount'])
+        walletBalance = Decimal(str(asset_dict.get('walletBalance') or '0'))
+        if walletBalance == 0:
+            walletBalance = Decimal(
+                str(asset_dict.get('totalWalletBalance')
+                    or asset_dict.get('umWalletBalance') or '0'))
+        unrealizedProfit = Decimal(
+            str(asset_dict.get('unrealizedProfit')
+                or asset_dict.get('umUnrealizedPNL') or '0'))
+        marginBalance = Decimal(str(asset_dict.get('marginBalance') or '0'))
+        if marginBalance == 0:
+            marginBalance = walletBalance + unrealizedProfit
+        maxWithdrawAmount = Decimal(
+            str(asset_dict.get('maxWithdrawAmount')
+                or asset_dict.get('totalAvailableBalance') or '0'))
         items.append({
             'asset': asset,
             'walletBalance': walletBalance,
@@ -2691,7 +2739,7 @@ def fetch_binance_dapi_ticker_data(exchange, symbol=None):
 
 
 # 获取当日成交订单
-def get_account_today_orders(exchange):
+def get_account_today_orders(exchange, account_type=ACCOUNT_TYPE_STANDARD):
     if exchange is None:
         return {'status': 0, 'msg': '', 'data': {'items': []}}
     now = datetime.now()
@@ -2699,7 +2747,12 @@ def get_account_today_orders(exchange):
     start_time_unix = int(start.timestamp() * 1000)
     params = {'startTime': start_time_unix}
 
-    orders = exchange.fapiPrivateGetUserTrades(params)
+    account = make_binance_account_adapter(exchange, account_type)
+    try:
+        orders = account.get_user_trades('um', params)
+    except ccxt.BaseError as e:
+        log_print(f'获取U本位当日成交失败: {e}')
+        return {'status': 0, 'msg': '获取当日成交失败', 'data': {'items': []}}
     if len(orders) == 0:
         return {'status': 0, 'msg': '', 'data': {'items': []}}
 
