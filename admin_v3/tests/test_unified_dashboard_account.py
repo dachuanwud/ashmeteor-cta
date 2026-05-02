@@ -73,6 +73,19 @@ class UnifiedDashboardExchange:
         return {'symbol': params['symbol'], 'price': '3000'}
 
 
+class UnifiedCrossMarginEthExchange(UnifiedDashboardExchange):
+    def papiGetBalance(self):
+        return [{
+            'asset': 'ETH',
+            'totalWalletBalance': '0.04',
+            'crossMarginFree': '0.04',
+            'cmWalletBalance': '0',
+            'cmUnrealizedPNL': '0',
+            'umWalletBalance': '0',
+            'umUnrealizedPNL': '0',
+        }]
+
+
 class UnifiedDashboardAccountTest(unittest.TestCase):
     def setUp(self):
         self.exchange = UnifiedDashboardExchange()
@@ -119,6 +132,14 @@ class UnifiedDashboardAccountTest(unittest.TestCase):
         self.assertEqual(balance['status'], 0)
         self.assertEqual(balance['data']['items'][0]['asset'], 'ETH')
         self.assertEqual(balance['data']['items'][0]['unrealized_profit'], 0.5)
+
+    def test_unified_dapi_balance_uses_total_wallet_for_coin_assets(self):
+        balance = get_dapi_account_balance(UnifiedCrossMarginEthExchange(),
+                                           'unified')
+
+        self.assertEqual(balance['status'], 0)
+        self.assertEqual(balance['data']['items'][0]['asset'], 'ETH')
+        self.assertEqual(balance['data']['items'][0]['margin_balance'], 0.04)
 
     def test_account_management_balance_accepts_unified_accounts(self):
         binance_list = [{

@@ -222,8 +222,8 @@ class BinanceAccountAdapterTest(unittest.TestCase):
         order = adapter.place_cm_order({'symbol': 'ETHUSD_PERP'})
 
         self.assertEqual(account['assets'][0]['asset'], 'ETH')
-        self.assertEqual(account['assets'][0]['walletBalance'], '2')
-        self.assertEqual(account['assets'][0]['marginBalance'], '2.5')
+        self.assertEqual(account['assets'][0]['walletBalance'], '2.2')
+        self.assertEqual(account['assets'][0]['marginBalance'], '2.2')
         self.assertEqual(account['positions'][0]['symbol'], 'ETHUSD_PERP')
         self.assertEqual(order['route'], 'papi')
         self.assertIn(('papi_balance', None), exchange.calls)

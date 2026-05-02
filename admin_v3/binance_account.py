@@ -76,10 +76,16 @@ class BinanceAccountAdapter:
 
         assets = []
         for item in self.get_balance_assets():
+            wallet_balance = item.get('walletBalance', '0')
+            margin_balance = item.get('marginBalance', '0')
+            if item.get('asset') != 'USDT':
+                wallet_balance = item.get('totalWalletBalance',
+                                          wallet_balance)
+                margin_balance = wallet_balance
             assets.append({
                 'asset': item.get('asset', ''),
-                'walletBalance': item.get('walletBalance', '0'),
-                'marginBalance': item.get('marginBalance', '0'),
+                'walletBalance': wallet_balance,
+                'marginBalance': margin_balance,
                 'unrealizedProfit': item.get('cmUnrealizedPNL', '0'),
             })
         return assets
