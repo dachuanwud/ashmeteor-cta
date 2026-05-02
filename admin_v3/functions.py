@@ -5836,19 +5836,39 @@ def spot_account_has_enough_coin(exchange, usd_symbol, coin_num):
 
 
 def dapi_buy_coin_list_and_transfer(exchange, asset_lists, mode, num, balance):
+    asset_lists = asset_lists or ''
+    mode = mode or ''
+    num = num or ''
+    if asset_lists.strip() == '' or mode.strip() == '' or num.strip() == '':
+        return {
+            'status': 500,
+            'msg': '请填写买币列表和买币参数',
+        }
+
     msg = {
         'status': 0,
         'msg': []
     }
-    asset_lists = asset_lists.split(',')
+    asset_lists = [asset.strip().upper() for asset in asset_lists.split(',')
+                   if asset.strip() != '']
+    if len(asset_lists) == 0:
+        return {
+            'status': 500,
+            'msg': '请填写买币列表',
+        }
 
     for asset in asset_lists:
         try:
             res = dapi_buy_coin_and_transfer(exchange, asset, mode, num, balance)
             if res['status'] == 0:
                 msg['msg'].append(f'{asset}购买并转入币本位成功')
+            else:
+                msg['status'] = 500
+                msg['msg'].append(
+                    f'{asset}购买并转入币本位失败: {res.get("msg", "")}')
         except Exception as e:
             print(e)
+            msg['status'] = 500
             msg['msg'].append(f'{asset}购买并转入币本位失败')
 
     return msg

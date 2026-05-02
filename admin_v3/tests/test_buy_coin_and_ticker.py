@@ -44,6 +44,22 @@ class BuyCoinAndTickerTest(unittest.TestCase):
         self.assertEqual(res['status'], 0)
         self.assertEqual(res['msg'], ['ETH购买并转入币本位成功'])
 
+    def test_buy_coin_list_requires_asset_and_amount(self):
+        res = dapi_buy_coin_list_and_transfer(object(), '', 'normal', '', '')
+
+        self.assertEqual(res['status'], 500)
+        self.assertIn('买币列表', res['msg'])
+        self.assertIn('买币参数', res['msg'])
+
+    def test_buy_coin_list_propagates_child_failure_message(self):
+        with patch('functions.dapi_buy_coin_and_transfer',
+                   return_value={'status': 500, 'msg': 'params error'}):
+            res = dapi_buy_coin_list_and_transfer(object(), 'ETH', 'normal',
+                                                  '10', '')
+
+        self.assertEqual(res['status'], 500)
+        self.assertEqual(res['msg'], ['ETH购买并转入币本位失败: params error'])
+
     def test_fetch_um_tickers_only_converts_last_price_to_numeric(self):
         prices = fetch_binance_ticker_data(TickerExchange())
 
