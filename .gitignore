@@ -3,6 +3,7 @@
 # Python/runtime artifacts
 __pycache__/
 *.py[cod]
+admin_v3/data/
 
 # Local IDE metadata
 .idea/
