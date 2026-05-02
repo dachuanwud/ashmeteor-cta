@@ -470,7 +470,8 @@ def cta_excute_period(*args, **kwargs):
         symbol_data.iloc[-10000:].to_csv(f'{fapi_path}/{cta_key}.csv',
                                          index=False)
 
-        df, *_ = getattr(factors, cta)(symbol_data.copy(), int(period))
+        df, *_ = getattr(factors, cta)(symbol_data.copy(),
+                                       factors.parse_cta_period(period))
 
         # 是否开启信号定期校准, 校准数据库与实盘信号差异
         if pos_infer:
@@ -1216,7 +1217,8 @@ def cta_usd_excute_period(*args, **kwargs):
         symbol_data.iloc[-10000:].to_csv(f'{dapi_path}/{cta_key}.csv',
                                          index=False)
 
-        df, *_ = getattr(factors, cta)(symbol_data.copy(), int(period))
+        df, *_ = getattr(factors, cta)(symbol_data.copy(),
+                                       factors.parse_cta_period(period))
 
         # 是否开启信号定期校准, 校准数据库与实盘信号差异
         if pos_infer:

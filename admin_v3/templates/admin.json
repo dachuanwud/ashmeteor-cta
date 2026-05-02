@@ -1440,6 +1440,10 @@
                                               "value": "adapt_bolling"
                                             },
                                             {
+                                              "label": "自适应布林防追高追空",
+                                              "value": "adapt_bolling_anti_chase"
+                                            },
+                                            {
                                               "label": "反转自适应布林",
                                               "value": "adapt_bolling_reverse"
                                             },
@@ -1805,6 +1809,10 @@
                               {
                                 "label": "自适应布林",
                                 "value": "adapt_bolling"
+                              },
+                              {
+                                "label": "自适应布林防追高追空",
+                                "value": "adapt_bolling_anti_chase"
                               },
                               {
                                 "label": "反转自适应布林",
@@ -3514,6 +3522,10 @@
                                               "value": "adapt_bolling"
                                             },
                                             {
+                                              "label": "自适应布林防追高追空",
+                                              "value": "adapt_bolling_anti_chase"
+                                            },
+                                            {
                                               "label": "反转自适应布林",
                                               "value": "adapt_bolling_reverse"
                                             },
@@ -4183,6 +4195,10 @@
                               {
                                 "label": "自适应布林",
                                 "value": "adapt_bolling"
+                              },
+                              {
+                                "label": "自适应布林防追高追空",
+                                "value": "adapt_bolling_anti_chase"
                               },
                               {
                                 "label": "反转自适应布林",

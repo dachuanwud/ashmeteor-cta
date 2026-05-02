@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 import talib
 import random
+import ast
 
 eps = 1e-8
 
@@ -28,6 +29,41 @@ if not hasattr(pd.DataFrame, 'append'):
 
 pd.set_option('expand_frame_repr', False)
 pd.set_option('display.max_rows', 100)  # 最多显示数据的行数
+
+
+def _coerce_period_value(value):
+    value = float(value)
+    return int(value) if value.is_integer() else value
+
+
+def parse_cta_period(period):
+    """
+    统一解析CTA参数，兼容单参数和二维参数。
+    示例：200 -> 200, "200" -> 200, "[200,20]" -> [200, 20], "200,20" -> [200, 20]
+    """
+    if isinstance(period, (list, tuple)):
+        return [_coerce_period_value(value) for value in period]
+    if isinstance(period, (int, float, np.integer, np.floating)):
+        return _coerce_period_value(period)
+
+    text = str(period).strip()
+    if text == '':
+        raise ValueError('period不能为空')
+    if text.startswith('[') or text.startswith('('):
+        parsed = ast.literal_eval(text)
+        if not isinstance(parsed, (list, tuple)):
+            return _coerce_period_value(parsed)
+        return [_coerce_period_value(value) for value in parsed]
+    if ',' in text:
+        return [_coerce_period_value(value.strip()) for value in text.split(',') if value.strip()]
+    return _coerce_period_value(text)
+
+
+def format_cta_period(period):
+    parsed = parse_cta_period(period)
+    if isinstance(parsed, list):
+        return '[' + ','.join(str(value) for value in parsed) + ']'
+    return str(parsed)
 
 
 def generate_signal_data(df):
@@ -57,6 +93,43 @@ def generate_signal_data(df):
     signal_data.columns = ['xAxis', 'yAxis', 'label', 'itemStyle']
     signal_data = signal_data.to_dict('records')
     return signal_data
+
+
+def process_anti_chase_entry_filter(df,
+                                    midline_col='median_fast',
+                                    max_fast_bias=0.20):
+    df['anti_chase_block_trigger'] = False
+    effective_position = 0
+
+    for i in df.index:
+        raw_signal = df.loc[i, 'signal']
+        if pd.isna(raw_signal):
+            continue
+
+        signal = int(raw_signal)
+        if signal == 0:
+            effective_position = 0
+            continue
+
+        if signal == effective_position:
+            continue
+
+        midline = df.loc[i, midline_col]
+        if pd.isna(midline) or midline == 0:
+            effective_position = signal
+            continue
+
+        fast_bias = df.loc[i, 'close'] / midline - 1
+        chase_condition = ((signal == 1 and fast_bias > max_fast_bias) or
+                           (signal == -1 and fast_bias < -max_fast_bias))
+        if chase_condition:
+            df.at[i, 'signal'] = 0
+            df.at[i, 'anti_chase_block_trigger'] = True
+            effective_position = 0
+        else:
+            effective_position = signal
+
+    return df
 
 
 # 随机生成交易信号
@@ -287,6 +360,31 @@ def adapt_bolling(*args):
     signal_data = generate_signal_data(df)
     return df, df['median'].tolist(), df['upper'].tolist(), df['lower'].tolist(
     ), signal_data
+
+
+def adapt_bolling_anti_chase(*args):
+    df = args[0]
+    para = parse_cta_period(args[1] if len(args) > 1 else [200, 20])
+    if isinstance(para, list):
+        n = int(para[0])
+        if len(para) > 1:
+            max_fast_bias = float(para[1]) / 100 if float(para[1]) > 1 else float(para[1])
+        else:
+            max_fast_bias = 0.20
+    else:
+        n = int(para)
+        max_fast_bias = 0.20
+
+    df, median, upper, lower, _ = adapt_bolling(df, n)
+    fast_n = max(int(n / 4), 1)
+    df['median_fast'] = df['close'].rolling(fast_n, min_periods=1).mean()
+    df['fast_bias'] = df['close'] / df['median_fast'] - 1
+    df = process_anti_chase_entry_filter(df,
+                                         midline_col='median_fast',
+                                         max_fast_bias=max_fast_bias)
+
+    signal_data = generate_signal_data(df)
+    return df, median, upper, lower, signal_data
 
 
 def signal_atrbolling_bias(*args):

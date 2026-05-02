@@ -4041,7 +4041,7 @@ def get_echarts_kline(exchange,
     global temp_df, temp_symbol, temp_interval, temp_cta, temp_period, temp_start_date
     if exchange is None or symbol == '' or cta == '' or period == '':
         return {'status': 0, 'msg': '', 'data': {}}
-    period = int(period)
+    period = factors.parse_cta_period(period)
     if start_date is not None:
         start_date = datetime.fromtimestamp(int(start_date))
     if temp_symbol == symbol and temp_interval == interval and temp_start_date == start_date and temp_df is not None:
@@ -4311,8 +4311,9 @@ def get_echarts_kline(exchange,
             }
         }])
 
-    if cta == 'adapt_bolling':
-        _, median, upper, lower, signal_data = adapt_bolling(df, period)
+    if cta in ('adapt_bolling', 'adapt_bolling_anti_chase'):
+        strategy_df, median, upper, lower, signal_data = getattr(factors, cta)(
+            df, period)
         kline_data['series'].extend([{
             'name': 'ma',
             'type': 'line',
@@ -4341,6 +4342,17 @@ def get_echarts_kline(exchange,
                 'opacity': 0.5
             }
         }])
+        if cta == 'adapt_bolling_anti_chase' and 'median_fast' in strategy_df:
+            kline_data['series'].append({
+                'name': 'median_fast',
+                'type': 'line',
+                'data': strategy_df['median_fast'].tolist(),
+                'smooth': True,
+                'symbol': 'none',
+                'lineStyle': {
+                    'opacity': 0.5
+                }
+            })
 
     if cta == 'adapt_bolling_reverse':
         _, median, upper, lower, signal_data = adapt_bolling_reverse(
@@ -6072,7 +6084,7 @@ def cta_usdt_create_strategy(data):
         symbol = data['symbol']
         interval = data['interval']
         cta = data['cta']
-        period = int(data['period'])
+        period = factors.format_cta_period(data['period'])
         cta_key = f'{symbol}_{interval}_{cta}_{period}'
         init_value = Decimal(data['init_value'])
         net_value = init_value
@@ -6768,7 +6780,7 @@ def get_cta_usdt_evaluate_params(exchange,
                 }]
             }
         }
-    period = int(period)
+    period = factors.parse_cta_period(period)
 
     face_value = 1
     if start_date is not None:
@@ -6834,7 +6846,7 @@ def get_cta_usdt_evaluate_monthly_params(exchange,
                 }]
             }
         }
-    period = int(period)
+    period = factors.parse_cta_period(period)
 
     face_value = 1
     if start_date is not None:
@@ -7128,7 +7140,8 @@ def cta_usd_create_strategy_by_json(data):
 
 # cta_usd表相关操作
 def cta_usd_create_strategy(data):
-    if isinstance(data['period'], str) and (',' in data['period']):
+    if (isinstance(data['period'], str) and (',' in data['period'])
+            and not data['period'].strip().startswith('[')):
         # 多参数的添加
         period_list = data['period'].split(',')
         msg = {'status': 0, 'msg': []}
@@ -7138,7 +7151,7 @@ def cta_usd_create_strategy(data):
                 symbol = data['symbol']
                 interval = data['interval']
                 cta = data['cta']
-                period = int(period)
+                period = factors.format_cta_period(period)
                 cta_key = f'{symbol}_{interval}_{cta}_{period}'
                 # init_value = Decimal(data['init_value'])
                 init_value = math.floor(Decimal(data['init_value']) / len(period_list))
@@ -7182,7 +7195,7 @@ def cta_usd_create_strategy(data):
             symbol = data['symbol']
             interval = data['interval']
             cta = data['cta']
-            period = int(data['period'])
+            period = factors.format_cta_period(data['period'])
             cta_key = f'{symbol}_{interval}_{cta}_{period}'
             init_value = Decimal(data['init_value'])
             net_value = init_value
