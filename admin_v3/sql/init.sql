@@ -3,6 +3,7 @@ CREATE TABLE `strategy` (
   `strategy` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '策略名称',
   `account` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL DEFAULT '' COMMENT '币安邮箱',
   `is_main` tinyint NOT NULL DEFAULT '0' COMMENT '是否主账户 ',
+  `account_type` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL DEFAULT 'standard' COMMENT '账户类型: standard普通账户 unified统一账户',
   `apikey` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL DEFAULT '' COMMENT '币安API',
   `secret` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL DEFAULT '' COMMENT '币安密钥',
   `trade_ratio` decimal(10,2) unsigned NOT NULL DEFAULT '1.00' COMMENT '策略杠杆',

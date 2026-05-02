@@ -189,7 +189,9 @@ def dapi_account_net_value(*args):
         usd_in, usd_out = get_dapi_transfer_info(exchange)
         all_usd_in += usd_in
         all_usd_out += usd_out
-        items = get_dapi_account_balance(exchange)['data']['items']
+        items = get_dapi_account_balance(
+            exchange,
+            binance.get('account_type', ACCOUNT_TYPE_STANDARD))['data']['items']
         margin_balance_usd = 0
         for i in items:
             margin_balance_usd += i['margin_balance_usd']
@@ -1552,11 +1554,13 @@ def cta_usd_rebalance(*args):
         for binance in args:
             exchange = binance['exchange']
             strategy = binance['strategy']
+            account = make_binance_account_adapter(
+                exchange, binance.get('account_type', ACCOUNT_TYPE_STANDARD))
             cta_keys = cta_usd_rebalance_get_strategy_rebalance_cta_keys(
-                strategy)
+                strategy, running_only=True)
             if len(cta_keys) == 0:
                 continue
-            account_info = exchange.dapiPrivate_get_account()
+            account_info = account.get_cm_account()
             assets = account_info['assets']
             if len(assets) == 0:
                 continue
@@ -1611,10 +1615,12 @@ def cta_usd_rebalance(*args):
                         log_print(f'{cta_key}初始化半套执行完成')
                         continue
 
-                    if cta_usd_open_limit_order(exchange, symbol,
+                    if cta_usd_open_limit_order(exchange,
+                                                symbol,
                                                 -need_order_amount,
                                                 price_precision,
-                                                last_price[symbol]):
+                                                last_price[symbol],
+                                                order_func=account.place_cm_order):
                         data = {
                             'init_value': margin_balance_usd,
                             'net_value': margin_balance_usd,
@@ -1645,10 +1651,12 @@ def cta_usd_rebalance(*args):
                         log_print(f'{cta_key}半套执行完成')
                         continue
 
-                    if cta_usd_open_limit_order(exchange, symbol,
+                    if cta_usd_open_limit_order(exchange,
+                                                symbol,
                                                 -need_order_amount,
                                                 price_precision,
-                                                last_price[symbol]):
+                                                last_price[symbol],
+                                                order_func=account.place_cm_order):
                         data = {
                             'net_value': margin_balance_usd,
                             'position_amount': -qty,

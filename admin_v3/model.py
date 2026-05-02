@@ -85,6 +85,10 @@ class Strategy(db.Model):
                     nullable=False,
                     server_default=text("'0'"),
                     comment='是否主账户')
+    account_type = Column(VARCHAR(32),
+                          nullable=False,
+                          server_default=text("'standard'"),
+                          comment='账户类型: standard普通账户 unified统一账户')
 
 
 class Deribit(db.Model):

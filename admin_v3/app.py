@@ -191,7 +191,9 @@ def account_management_balance():
 def dapi_account_balance():
     strategy = request.args.get('strategy')
     exchange = get_exchange(binance_list, strategy)
-    res = make_response(jsonify(get_dapi_account_status(exchange)))
+    account_type = get_exchange_account_type(binance_list, strategy)
+    res = make_response(jsonify(get_dapi_account_status(exchange,
+                                                        account_type)))
     res = decorate_res(res)
     return res
 
@@ -271,7 +273,9 @@ def account_management_uni_transfer_history():
 def dapi_account_position():
     strategy = request.args.get('strategy')
     exchange = get_exchange(binance_list, strategy)
-    res = make_response(jsonify(get_dapi_account_positions_list(exchange)))
+    account_type = get_exchange_account_type(binance_list, strategy)
+    res = make_response(jsonify(get_dapi_account_positions_list(exchange,
+                                                                account_type)))
     res = decorate_res(res)
     return res
 

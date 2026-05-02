@@ -8,6 +8,7 @@ from factors import *
 import factors
 from model import CtaUsdt, CtaUsd, CtaUsdRebalance, Strategy, LongBlackList, ShortBlackList
 from exts import db
+from binance_account import ACCOUNT_TYPE_STANDARD, make_binance_account_adapter
 import time
 import json
 import pandas as pd
@@ -100,6 +101,7 @@ def add_account(data):
         account = data['account']
         apikey = data['apikey']
         secret = data['secret']
+        account_type = data.get('account_type', ACCOUNT_TYPE_STANDARD)
 
         # 查询是否重复
         res = Strategy.query.filter(Strategy.account == account).first()
@@ -114,6 +116,7 @@ def add_account(data):
             account=account,
             apikey=apikey,
             secret=secret,
+            account_type=account_type,
         )
         db.session.add(item)
         db.session.commit()
@@ -149,6 +152,18 @@ def get_exchange(binance_list, strategy):
     for i in binance_list:
         if strategy == i['strategy']:
             return i['exchange']
+
+
+def get_exchange_account_type(binance_list, strategy):
+    for i in binance_list:
+        if strategy == i['strategy']:
+            return i.get('account_type', ACCOUNT_TYPE_STANDARD)
+    return ACCOUNT_TYPE_STANDARD
+
+
+def get_strategy_account_type(strategy):
+    st = Strategy.query.filter(Strategy.strategy == strategy).first()
+    return getattr(st, 'account_type', ACCOUNT_TYPE_STANDARD) if st else ACCOUNT_TYPE_STANDARD
 
 
 def get_main_exchange(binance_list):
@@ -200,7 +215,8 @@ def get_binance_list(st):
             'takeprofit_percentage': i.takeprofit_percentage,
             'stoploss_percentage': i.stoploss_percentage,
             'exchange': exchange,
-            'is_main': i.is_main
+            'is_main': i.is_main,
+            'account_type': getattr(i, 'account_type', ACCOUNT_TYPE_STANDARD)
         })
     return binance_list
 
@@ -422,11 +438,13 @@ def get_account_positions_list(exchange):
     }
 
 
-def get_dapi_account_positions_list(exchange):
+def get_dapi_account_positions_list(exchange,
+                                    account_type=ACCOUNT_TYPE_STANDARD):
     if exchange is None:
         return {'status': 0, 'msg': '', 'data': {'items': []}}
     last_price = fetch_binance_dapi_ticker_data(exchange)
-    account_info = exchange.dapiPrivate_get_account()
+    account = make_binance_account_adapter(exchange, account_type)
+    account_info = account.get_cm_account()
     assets = account_info['assets']
     positions = account_info['positions']
     items = []
@@ -733,11 +751,12 @@ def get_account_management_balance(binance_list):
     }
 
 
-def get_dapi_account_status(exchange):
+def get_dapi_account_status(exchange, account_type=ACCOUNT_TYPE_STANDARD):
     if exchange is None:
         return {'status': 0, 'msg': '', 'data': {'items': []}}
     last_price = fetch_binance_dapi_ticker_data(exchange)
-    account_info = exchange.dapiPrivate_get_account()
+    account = make_binance_account_adapter(exchange, account_type)
+    account_info = account.get_cm_account()
     assets = account_info['assets']
     positions = account_info['positions']
     items = []
@@ -747,7 +766,7 @@ def get_dapi_account_status(exchange):
     cta_usdt_items = CtaUsd.query.filter(CtaUsd.is_del == 0).order_by(
         CtaUsd.symbol).all()
     if len(cta_usdt_items) == 0:
-        return get_dapi_account_balance(exchange)
+        return get_dapi_account_balance(exchange, account_type)
     cta_items = []
     for c in cta_usdt_items:
         cta_items.append(c.to_dict())
@@ -862,11 +881,12 @@ def get_dapi_account_status(exchange):
     }
 
 
-def get_dapi_account_balance(exchange):
+def get_dapi_account_balance(exchange, account_type=ACCOUNT_TYPE_STANDARD):
     if exchange is None:
         return {'status': 0, 'msg': '', 'data': {'items': []}}
     last_price = fetch_binance_dapi_ticker_data(exchange)
-    account_info = exchange.dapiPrivate_get_account()
+    account = make_binance_account_adapter(exchange, account_type)
+    account_info = account.get_cm_account()
     assets = account_info['assets']
     positions = account_info['positions']
     items = []
@@ -1099,6 +1119,8 @@ def strategy_get_row(strategy):
                 'id': st.id,
                 'strategy': st.strategy,
                 'account': st.account,
+                'account_type': getattr(st, 'account_type',
+                                        ACCOUNT_TYPE_STANDARD),
                 'trade_ratio': st.trade_ratio,
                 'takeprofit_percentage': st.takeprofit_percentage,
                 'stoploss_percentage': st.stoploss_percentage,
@@ -1114,6 +1136,7 @@ def strategy_update_params(data):
     st = Strategy.query.filter(Strategy.strategy == data['strategy']).first()
     st.strategy = data['strategy']
     st.account = data['account']
+    st.account_type = data.get('account_type', ACCOUNT_TYPE_STANDARD)
     st.trade_ratio = data['trade_ratio']
     st.takeprofit_percentage = data['takeprofit_percentage']
     st.stoploss_percentage = data['stoploss_percentage']
@@ -7077,7 +7100,8 @@ def cta_usd_open_limit_order(exchange,
                              order_amount,
                              price_precision,
                              last_price,
-                             reduce_only=False):
+                             reduce_only=False,
+                             order_func=None):
     if exchange is None or symbol is None:
         return False
     if order_amount == 0:
@@ -7119,7 +7143,7 @@ def cta_usd_open_limit_order(exchange,
         log_print('下单参数：', params)
 
         try:
-            open_order = robust(func=exchange.dapiPrivate_post_order,
+            open_order = robust(func=order_func or exchange.dapiPrivate_post_order,
                                 params=params,
                                 func_name='cta_usd_open_limit_order')
             log_print('下单完成，下单信息：', open_order)
@@ -7155,7 +7179,7 @@ def cta_usd_open_limit_order(exchange,
     log_print('下单参数：', params)
 
     try:
-        open_order = robust(func=exchange.dapiPrivate_post_order,
+        open_order = robust(func=order_func or exchange.dapiPrivate_post_order,
                             params=params,
                             func_name='cta_usd_open_limit_order')
         log_print('下单完成，下单信息：', open_order)
@@ -7428,12 +7452,15 @@ def cta_usd_rebalance_get_list(symbol, is_running, cta, signal):
     }
 
 
-def cta_usd_rebalance_get_strategy_rebalance_cta_keys(strategy):
+def cta_usd_rebalance_get_strategy_rebalance_cta_keys(strategy,
+                                                      running_only=False):
     try:
         cta_keys = []
-        items = CtaUsdRebalance.query.filter(
-            CtaUsdRebalance.strategy == strategy,
-            CtaUsdRebalance.is_del == 0).all()
+        query = CtaUsdRebalance.query.filter(
+            CtaUsdRebalance.strategy == strategy, CtaUsdRebalance.is_del == 0)
+        if running_only:
+            query = query.filter(CtaUsdRebalance.is_running == 1)
+        items = query.all()
         for item in items:
             cta_keys.append(item.cta_key)
         return cta_keys
@@ -7473,7 +7500,9 @@ def cta_usd_rebalance_force_rebalance(exchange, strategy, symbol):
             'msg': 'params error',
         }
 
-    account_info = exchange.dapiPrivate_get_account()
+    account = make_binance_account_adapter(exchange,
+                                           get_strategy_account_type(strategy))
+    account_info = account.get_cm_account()
     assets = account_info['assets']
     # positions = account_info['positions']
     # assets = [s for s in assets if float(s['walletBalance']) > 0]
@@ -7487,11 +7516,19 @@ def cta_usd_rebalance_force_rebalance(exchange, strategy, symbol):
     price_precision = get_dapi_exchange_info(exchange)
     last_price = fetch_binance_dapi_ticker_data(exchange, symbol)
 
+    matched_asset = None
     for s in assets:
         if f'{s["asset"]}USD_PERP' == symbol:
-            margin_balance = float(s['marginBalance'])
-            margin_balance_usd = float(s['marginBalance']) * last_price
+            matched_asset = s
             break
+    if matched_asset is None:
+        return {
+            'status': 0,
+            'msg': f'{symbol}没有可半套的币本位资产',
+        }
+    s = matched_asset
+    margin_balance = float(s['marginBalance'])
+    margin_balance_usd = margin_balance * last_price
 
     cta_key = cta_usd_rebalance_get_cta_key(strategy, symbol)
     trade_info = cta_usd_rebalance_get_trade_info(cta_key)
@@ -7516,8 +7553,12 @@ def cta_usd_rebalance_force_rebalance(exchange, strategy, symbol):
             'msg': '需要下单量为0，无需执行',
         }
 
-    if cta_usd_open_limit_order(exchange, symbol, -need_order_amount,
-                                price_precision, last_price):
+    if cta_usd_open_limit_order(exchange,
+                                symbol,
+                                -need_order_amount,
+                                price_precision,
+                                last_price,
+                                order_func=account.place_cm_order):
         data = {
             'init_value': margin_balance_usd,
             'net_value': margin_balance_usd,
@@ -7541,7 +7582,9 @@ def cta_usd_rebalance_force_all_rebalance(exchange, strategy):
             'msg': 'params error',
         }
 
-    account_info = exchange.dapiPrivate_get_account()
+    account = make_binance_account_adapter(exchange,
+                                           get_strategy_account_type(strategy))
+    account_info = account.get_cm_account()
     assets = account_info['assets']
 
     if len(assets) == 0:
@@ -7556,18 +7599,25 @@ def cta_usd_rebalance_force_all_rebalance(exchange, strategy):
         'status': 0,
         'msg': [],
     }
-    rebalance_list = CtaUsdRebalance.query.all()
+    rebalance_list = CtaUsdRebalance.query.filter(
+        CtaUsdRebalance.strategy == strategy, CtaUsdRebalance.is_del == 0).all()
     for cta_rebalance in rebalance_list:
 
         symbol = cta_rebalance.symbol
 
         last_price = fetch_binance_dapi_ticker_data(exchange, symbol)
 
+        matched_asset = None
         for s in assets:
             if f'{s["asset"]}USD_PERP' == symbol:
-                margin_balance = float(s['marginBalance'])
-                margin_balance_usd = float(s['marginBalance']) * last_price
+                matched_asset = s
                 break
+        if matched_asset is None:
+            all_msg['msg'].append(f'{symbol}没有可半套的币本位资产')
+            continue
+        s = matched_asset
+        margin_balance = float(s['marginBalance'])
+        margin_balance_usd = margin_balance * last_price
 
         cta_key = cta_usd_rebalance_get_cta_key(strategy, symbol)
         trade_info = cta_usd_rebalance_get_trade_info(cta_key)
@@ -7588,8 +7638,12 @@ def cta_usd_rebalance_force_all_rebalance(exchange, strategy):
             all_msg['msg'].append(f'{cta_key}需要下单量为0，无需执行')
             continue
 
-        if cta_usd_open_limit_order(exchange, symbol, -need_order_amount,
-                                    price_precision, last_price):
+        if cta_usd_open_limit_order(exchange,
+                                    symbol,
+                                    -need_order_amount,
+                                    price_precision,
+                                    last_price,
+                                    order_func=account.place_cm_order):
             data = {
                 'init_value': margin_balance_usd,
                 'net_value': margin_balance_usd,
