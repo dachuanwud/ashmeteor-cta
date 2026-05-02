@@ -842,9 +842,10 @@ def dapi_buy_coin():
     num = request.args.get('num')
     balance = request.args.get('balance')
     exchange = get_exchange(binance_list, strategy)
+    account_type = get_exchange_account_type(binance_list, strategy)
     res = make_response(
         jsonify(dapi_buy_coin_and_transfer(exchange, asset, mode, num,
-                                           balance)))
+                                           balance, account_type)))
     res = decorate_res(res)
     return res
 
@@ -857,9 +858,10 @@ def dapi_buy_coin_list():
     num = request.args.get('num')
     balance = request.args.get('balance')
     exchange = get_exchange(binance_list, strategy)
+    account_type = get_exchange_account_type(binance_list, strategy)
     res = make_response(
         jsonify(dapi_buy_coin_list_and_transfer(exchange, asset_lists, mode, num,
-                                   balance)))
+                                   balance, account_type)))
     res = decorate_res(res)
     return res
 

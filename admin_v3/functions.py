@@ -5835,7 +5835,12 @@ def spot_account_has_enough_coin(exchange, usd_symbol, coin_num):
     return False
 
 
-def dapi_buy_coin_list_and_transfer(exchange, asset_lists, mode, num, balance):
+def dapi_buy_coin_list_and_transfer(exchange,
+                                    asset_lists,
+                                    mode,
+                                    num,
+                                    balance,
+                                    account_type=ACCOUNT_TYPE_STANDARD):
     asset_lists = asset_lists or ''
     mode = mode or ''
     num = num or ''
@@ -5859,7 +5864,8 @@ def dapi_buy_coin_list_and_transfer(exchange, asset_lists, mode, num, balance):
 
     for asset in asset_lists:
         try:
-            res = dapi_buy_coin_and_transfer(exchange, asset, mode, num, balance)
+            res = dapi_buy_coin_and_transfer(exchange, asset, mode, num,
+                                             balance, account_type)
             if res['status'] == 0:
                 msg['msg'].append(f'{asset}购买并转入币本位成功')
             else:
@@ -5874,7 +5880,51 @@ def dapi_buy_coin_list_and_transfer(exchange, asset_lists, mode, num, balance):
     return msg
 
 
-def dapi_buy_coin_and_transfer(exchange, asset, mode, num, balance):
+def dapi_buy_coin_with_unified_account(exchange, asset, usd_num):
+    ticker = exchange.public_get_ticker_price({'symbol':
+                                                   f'{asset}USDT'})['price']
+    ticker = Decimal(ticker)
+    log_print(f'{asset}现货当前价格为{ticker}')
+
+    account = make_binance_account_adapter(exchange, 'unified')
+    summary = account.get_account_summary()
+    available = Decimal(str(summary.get('totalAvailableBalance') or '0'))
+    if available < usd_num:
+        return {
+            'status': 500,
+            'msg': f'统一账户可用余额不足，可用 {available} USDT，需要 {usd_num} USDT',
+        }
+
+    params = {
+        'symbol': f'{asset}USDT',
+        'side': 'BUY',
+        'type': 'MARKET',
+        'quoteOrderQty': usd_num
+    }
+    try:
+        res = account.place_margin_order(params)
+        log_print(res)
+        executed_qty = Decimal(res.get('executedQty', '0'))
+        commission = Decimal('0')
+        for fill in res.get('fills', []):
+            commission += Decimal(str(fill.get('commission', '0')))
+        qty = executed_qty - commission
+        return {
+            'status': 0,
+            'msg': f'统一账户买入{asset}成功，成交数量约 {qty}',
+        }
+    except Exception as e:
+        log_print(f'统一账户购买{asset}失败')
+        log_print(e)
+        return {'status': -1, 'msg': f'统一账户购买{asset}失败: {e}'}
+
+
+def dapi_buy_coin_and_transfer(exchange,
+                               asset,
+                               mode,
+                               num,
+                               balance,
+                               account_type=ACCOUNT_TYPE_STANDARD):
     if exchange is None or asset == '' or mode == '' or num == '':
         return {
             'status': 500,
@@ -5900,6 +5950,9 @@ def dapi_buy_coin_and_transfer(exchange, asset, mode, num, balance):
             'status': 500,
             'msg': '数值错误，最小划转10U的币',
         }
+
+    if account_type == 'unified':
+        return dapi_buy_coin_with_unified_account(exchange, asset, usd_num)
 
     ticker = exchange.public_get_ticker_price({'symbol':
                                                    f'{asset}USDT'})['price']
