@@ -1090,6 +1090,7 @@ def cta_usd_update():
 @app.route('/cta/usd/start', methods=['GET'])
 def cta_usd_start():
     cta_key = request.args.get('cta_key')
+    sync_last_signal = request.args.get('sync_last_signal') == '1'
     try:
         strategy, symbol, interval, cta, period = cta_usd_get_startegy_params_by_cta_key(
             cta_key)
@@ -1101,7 +1102,7 @@ def cta_usd_start():
     exchange = get_exchange(binance_list, strategy)
     account_type = get_exchange_account_type(binance_list, strategy)
     excutor.submit(cta_usd_excute_init, exchange, symbol, interval, cta,
-                   period, account_type)
+                   period, account_type, sync_last_signal=sync_last_signal)
     res = make_response(jsonify({'status': 0, 'msg': ''}))
     res = decorate_res(res)
     return res

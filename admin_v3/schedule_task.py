@@ -1007,7 +1007,7 @@ def scheduler_deribit_account_balance(*args):
                   index=True)
 
 
-def cta_usd_excute_init(*args):
+def cta_usd_excute_init(*args, **kwargs):
     with scheduler.app.app_context():
         exchange = args[0]
         symbol = args[1]
@@ -1015,6 +1015,7 @@ def cta_usd_excute_init(*args):
         cta = args[3]
         period = args[4]
         account_type = args[5] if len(args) > 5 else ACCOUNT_TYPE_STANDARD
+        sync_last_signal = kwargs.get('sync_last_signal', False)
 
         # 初始化获取10000条K线
         symbol_data = dapi_get_kline(exchange, symbol, interval, 10000)
@@ -1029,7 +1030,8 @@ def cta_usd_excute_init(*args):
                               trigger='cron',
                               minute='*/' + interval.split('m')[0],
                               misfire_grace_time=300,
-                              max_instances=1)
+                              max_instances=1,
+                              replace_existing=True)
         elif interval.find('h') >= 0:  # 添加循环间隔是小时的子类的定时任务
             scheduler.add_job(id=cta_key,
                               func=cta_usd_excute_period,
@@ -1038,12 +1040,23 @@ def cta_usd_excute_init(*args):
                               trigger='cron',
                               hour='*/' + interval.split('h')[0],
                               misfire_grace_time=300,
-                              max_instances=1)
+                              max_instances=1,
+                              replace_existing=True)
         else:  # 注意暂时未判断按天的策略
             log_print(cta_key, '时间间隔格式错误，请修改')
         cta_usd_update_trade_info(cta_key, data={'is_running': 1})
         log_print(f'{cta_key}策略启动成功')
         send_wechat(f'{cta_key}策略启动成功')
+        if sync_last_signal:
+            log_print(f'{cta_key}启动后同步上次有效信号开始')
+            cta_usd_excute_period(exchange,
+                                  symbol,
+                                  interval,
+                                  cta,
+                                  period,
+                                  account_type,
+                                  pos_infer=True)
+            log_print(f'{cta_key}启动后同步上次有效信号结束')
         time.sleep(1)
 
 

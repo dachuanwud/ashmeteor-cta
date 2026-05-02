@@ -3555,6 +3555,19 @@
                                                         },
                                                         {
                                                             "type": "button",
+                                                            "label": "启动并同步上次有效信号",
+                                                            "actionType": "ajax",
+                                                            "level": "warning",
+                                                            "className": "text-danger",
+                                                            "confirmText": "进取模式会在启动后立刻按上次有效信号同步仓位，可能立即下单，确定继续？",
+                                                            "api": {
+                                                                "method": "get",
+                                                                "url": "/cta/usd/start?cta_key=${cta_key}&sync_last_signal=1"
+                                                            },
+                                                            "id": "u:5b3fb9e6427f_sync"
+                                                        },
+                                                        {
+                                                            "type": "button",
                                                             "label": "停止策略",
                                                             "actionType": "ajax",
                                                             "level": "warning",
