@@ -5,8 +5,8 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from functions import (get_account_balance, get_account_margin,
-                       get_account_positions_list, get_account_today_orders,
-                       get_all_account_balance,
+                       get_account_openorders, get_account_positions_list,
+                       get_account_today_orders, get_all_account_balance,
                        get_all_account_positions_list)
 
 
@@ -39,6 +39,9 @@ class UnifiedDashboardExchange:
 
     def papiGetUmUserTrades(self, params=None):
         return []
+
+    def papiGetUmOpenOrders(self, params=None):
+        return [{'symbol': 'ETHUSDT', 'orderId': '1', 'side': 'BUY'}]
 
 
 class UnifiedDashboardAccountTest(unittest.TestCase):
@@ -74,6 +77,12 @@ class UnifiedDashboardAccountTest(unittest.TestCase):
                          'admin_v3_unified')
         self.assertEqual(positions['status'], 0)
         self.assertEqual(positions['data']['items'][0]['symbol'], 'ETHUSDT')
+
+    def test_unified_open_orders_use_papi_adapter(self):
+        openorders = get_account_openorders(self.exchange, 'unified')
+
+        self.assertEqual(openorders['status'], 0)
+        self.assertEqual(openorders['data']['items'][0]['symbol'], 'ETHUSDT')
 
 
 if __name__ == '__main__':

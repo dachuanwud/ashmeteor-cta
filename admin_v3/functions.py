@@ -5596,14 +5596,19 @@ def get_dapi_strategy_exchange_info(exchange, symbol):
     }
 
 
-def get_account_openorders(exchange):
+def get_account_openorders(exchange, account_type=ACCOUNT_TYPE_STANDARD):
     if exchange is None:
         return {'status': 0, 'msg': '', 'data': {'items': []}}
-    openorders = exchange.fapiPrivateGetOpenorders()
+    account = make_binance_account_adapter(exchange, account_type)
+    try:
+        openorders = account.get_open_orders('um')
+    except ccxt.BaseError as e:
+        log_print(f'获取U本位当前委托失败: {e}')
+        return {'status': 0, 'msg': '获取当前委托失败', 'data': {'items': []}}
     items = []
     # 过滤掉BUSD合约
     for order in openorders:
-        if order['symbol'].endswith('BUSD'):
+        if order.get('symbol', '').endswith('BUSD'):
             continue
         items.append(order)
     columns = []

@@ -796,7 +796,9 @@ def dapi_strategy_exchange_info():
 def account_openorders():
     strategy = request.args.get('strategy')
     exchange = get_exchange(binance_list, strategy)
-    res = make_response(jsonify(get_account_openorders(exchange)))
+    account_type = get_exchange_account_type(binance_list, strategy)
+    res = make_response(jsonify(get_account_openorders(exchange,
+                                                        account_type)))
     res = decorate_res(res)
     return res
 
