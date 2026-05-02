@@ -9,9 +9,8 @@ from model import Deribit, Strategy
 from schedule_task import *
 from concurrent.futures import ThreadPoolExecutor
 from exts import db
-from config import google_key, sql_uri, users, debug, ip_white_list, tpsl_blacklist, alpha_tpsl_time, cta_tpsl_time,super_mm
-from google import CalGoogleCode
-import time
+from auth import authenticate_login
+from config import google_key, sql_uri, users, debug, ip_white_list, tpsl_blacklist, alpha_tpsl_time, cta_tpsl_time, super_mm, super_users, super_password
 
 app = Flask(__name__, static_url_path='/')
 app.config['JSON_AS_ASCII'] = False
@@ -69,19 +68,17 @@ def login():
         session.pop('user_id', None)
         data = request.get_json()
         username = data['username']
-        google_code = data['google_code']
-        current_time = int(time.time()) // 30
-        correct_code = CalGoogleCode.cal_google_code(google_key, current_time)
-        user = [u for u in users if u.username == username]
-        if len(user) > 0:
-            user = user[0]
-        if (user and google_code == correct_code) or (user and google_code == super_mm):
+        credential = data['google_code']
+        user = authenticate_login(username, credential, users, google_key,
+                                  super_mm, super_users, super_password)
+        if user:
             session['user_id'] = user.id
             res = make_response(jsonify({'status': 0, 'msg': '请刷新页面'}))
             res = decorate_res(res)
             return res
         else:
-            res = make_response(jsonify({'status': 500, 'msg': '用户名或谷歌验证码错误'}))
+            res = make_response(
+                jsonify({'status': 500, 'msg': '用户名或验证码/密码错误'}))
             res = decorate_res(res)
             return res
     if request.method == 'GET':

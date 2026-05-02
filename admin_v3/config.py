@@ -33,8 +33,19 @@ auto_add_re = True
 # 自动校准功能, 会导致半路自动上车
 pos_infer = False
 
-# 超级密码 临时有用可以用到
+# 兼容旧逻辑: 已存在用户可用这个临时超级码代替 Google 验证码
 super_mm = os.getenv('ASHMETEOR_SUPER_MM', '')
+
+# 独立超级用户: 用户名 + 密码登录, 不依赖 Google 验证码
+super_users = [
+    username.strip()
+    for username in os.getenv(
+        'ASHMETEOR_SUPER_USERS',
+        os.getenv('ASHMETEOR_SUPER_USERNAME', ''),
+    ).split(',')
+    if username.strip()
+]
+super_password = os.getenv('ASHMETEOR_SUPER_PASSWORD', '')
 
 # amis在线编辑器的域（debug模式下可用）（废弃，暂时用不到）
 amis_edit_origin = 'https://aisuda.github.io'
@@ -91,10 +102,10 @@ class User:
     username: str
 
 
-users = [
-    User(i + 1, username.strip())
-    for i, username in enumerate(
-        os.getenv('ASHMETEOR_USERS', '猫妈').split(',')
-    )
+normal_usernames = [
+    username.strip()
+    for username in os.getenv('ASHMETEOR_USERS', '猫妈').split(',')
     if username.strip()
 ]
+login_usernames = list(dict.fromkeys(normal_usernames + super_users))
+users = [User(i + 1, username) for i, username in enumerate(login_usernames)]
