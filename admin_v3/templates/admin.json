@@ -2941,22 +2941,44 @@
                                 "inline": true,
                                 "tpl": "${cta_re_position_ratio * 100}%"
                               },
-                              {
+                            {
                                 "type": "text",
-                                "label": "未实现盈亏",
-                                "name": "unrealized_profit",
-                                "id": "u:06dab214b9e8"
-                              },
-                              {
+                                "label": "本金(USD)",
+                                "name": "account_principal",
+                                "id": "u:account-principal",
+                                "tpl": "${ROUND(account_principal, 2)}"
+                            },
+                            {
                                 "type": "text",
-                                "label": "收益率",
+                                "label": "账户盈亏(USD)",
+                                "name": "account_profit",
+                                "id": "u:account-profit",
+                                "tpl": "${ROUND(account_profit, 2)}"
+                            },
+                            {
+                                "type": "text",
+                                "label": "账户收益率",
                                 "name": "profit_ratio",
                                 "id": "u:cffdb3a9a67b",
                                 "inline": true,
-                                "tpl": "${profit_ratio * 100}%"
-                              }
-                            ]
-                          },
+                                "tpl": "${ROUND(profit_ratio * 100, 2)}%"
+                            },
+                            {
+                                "type": "text",
+                                "label": "合约浮盈(币)",
+                                "name": "unrealized_profit",
+                                "id": "u:06dab214b9e8"
+                            },
+                            {
+                                "type": "text",
+                                "label": "合约收益率",
+                                "name": "contract_profit_ratio",
+                                "id": "u:contract-profit-ratio",
+                                "inline": true,
+                                "tpl": "${ROUND(contract_profit_ratio * 100, 2)}%"
+                            }
+                        ]
+                    },
                           {
                             "type": "crud",
                             "id": "u:4f69234db1d9",

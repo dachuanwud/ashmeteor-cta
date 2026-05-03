@@ -31,6 +31,14 @@ simplefilter(action='ignore', category=FutureWarning)
 eps = 1e-8
 
 
+def calculate_account_profit_ratio(current_equity, principal):
+    current_equity = float(current_equity or 0)
+    principal = float(principal or 0)
+    if principal <= 0:
+        return 0
+    return round((current_equity - principal) / principal, 4)
+
+
 # 重写log_print方法，加入时间信息
 def log_print(*objects, sep=' ', end='\n', file=sys.stdout, flush=False):
     print('[%s]' % str(datetime.now()),
@@ -949,6 +957,15 @@ def get_dapi_account_status(exchange, account_type=ACCOUNT_TYPE_STANDARD):
             df_re.get('position_amount', {}).get(symbol, 0))
         cta_re_position_ratio = abs(cta_re_position) * (
             10 if s["asset"] != 'BTC' else 100) / (margin_balance_usd + 1e-9)
+        account_principal = float(df_re.get('init_value', {}).get(symbol, 0)
+                                  or 0)
+        account_profit = round(margin_balance_usd - account_principal, 2) \
+            if account_principal > 0 else 0
+        account_profit_ratio = calculate_account_profit_ratio(
+            margin_balance_usd, account_principal)
+        contract_profit_ratio = round(
+            float(s['unrealizedProfit']) / float(s['walletBalance']), 4) \
+            if float(s['walletBalance']) != 0 else 0
 
         item = {
             'asset':
@@ -973,9 +990,17 @@ def get_dapi_account_status(exchange, account_type=ACCOUNT_TYPE_STANDARD):
                 round(float(cta_re_position_ratio), 4),
             'unrealized_profit':
                 round(float(s['unrealizedProfit']), 5),
+            'account_principal':
+                round(account_principal, 2),
+            'account_profit':
+                account_profit,
+            'account_profit_ratio':
+                account_profit_ratio,
+            'contract_profit_ratio':
+                contract_profit_ratio,
             'profit_ratio':
-                round(float(s['unrealizedProfit']) / float(s['walletBalance']), 4)
-                if float(s['walletBalance']) != 0 else 0
+                account_profit_ratio if account_principal > 0 else
+                contract_profit_ratio
         }
         if float(s['marginBalance']) != 0:
             items.append(item)
@@ -991,6 +1016,10 @@ def get_dapi_account_status(exchange, account_type=ACCOUNT_TYPE_STANDARD):
                 'cta_re_position': 0,
                 'cta_re_position_ratio': 0,
                 'unrealized_profit': 0,
+                'account_principal': 0,
+                'account_profit': 0,
+                'account_profit_ratio': 0,
+                'contract_profit_ratio': 0,
                 'profit_ratio': 0
             })
 

@@ -8,7 +8,8 @@ from functions import (get_account_balance, get_account_margin,
                        get_account_openorders, get_account_positions_list,
                        get_account_today_orders,
                        get_account_management_balance, get_all_account_balance,
-                       get_all_account_positions_list, get_dapi_account_balance)
+                       get_all_account_positions_list, get_dapi_account_balance,
+                       calculate_account_profit_ratio)
 
 
 class UnifiedDashboardExchange:
@@ -153,6 +154,11 @@ class UnifiedDashboardAccountTest(unittest.TestCase):
         self.assertEqual(balance['status'], 0)
         self.assertEqual(balance['data']['items'][0]['account_total'],
                          '1200.0')
+
+    def test_account_profit_ratio_uses_principal_not_contract_pnl_only(self):
+        self.assertEqual(calculate_account_profit_ratio(1100, 1000), 0.1)
+        self.assertEqual(calculate_account_profit_ratio(995, 1000), -0.005)
+        self.assertEqual(calculate_account_profit_ratio(1100, 0), 0)
 
 
 if __name__ == '__main__':
