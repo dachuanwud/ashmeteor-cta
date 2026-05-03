@@ -57,6 +57,14 @@ def admin():
     return render_template('admin.html')
 
 
+@app.route('/admin/schema', methods=['GET'])
+def admin_schema():
+    res = make_response(render_template('admin.json'))
+    res.mimetype = 'application/json'
+    res.headers['Cache-Control'] = 'no-store'
+    return res
+
+
 @app.route("/login", methods=['GET', 'POST', 'OPTIONS'])
 def login():
     if request.method == 'OPTIONS':
