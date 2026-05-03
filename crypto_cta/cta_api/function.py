@@ -51,8 +51,10 @@ def transfer_to_period_data(df:pd.DataFrame, rule_type='5T'):
     period_df_list = []
     # 通过持仓周期来计算需要多少个offset，遍历转换每一个offset数据
     for offset in range(int(rule_type[:-1])):
-        period_df = df.resample(rule_type, offset=offset).agg(agg_dict)
-        period_df['kline_pct'] = df['pct'].resample(rule_type, offset=offset).apply(lambda x: list(x))
+        unit = rule_type[-1].upper()
+        resample_offset = pd.to_timedelta(offset, unit='h' if unit == 'H' else 'min')
+        period_df = df.resample(rule_type, offset=resample_offset).agg(agg_dict)
+        period_df['kline_pct'] = df['pct'].resample(rule_type, offset=resample_offset).apply(lambda x: list(x))
         period_df['offset'] = offset
         period_df.reset_index(inplace=True)
         period_df.dropna(subset=['symbol'], inplace=True)
@@ -161,6 +163,53 @@ def cal_equity_curve(df, slippage=1 / 1000, c_rate=5 / 10000, leverage_rate=3,
 
     return df
 
+
+def process_anti_chase_entry_filter(df, midline_col='median_fast', max_fast_bias=0.25):
+    """
+    过度偏离中轨禁止追单：价格已远离fast_n中轨时，阻止新的同方向开仓。
+    :param df: 必须包含close、signal和midline_col列
+    :param midline_col: fast_n中轨列
+    :param max_fast_bias: 允许开仓的最大fast_n中轨偏离，0.25表示25%
+    :return:
+    """
+    df['anti_chase_block_trigger'] = False
+    effective_position = 0
+
+    for i in df.index:
+        raw_signal = df.loc[i, 'signal']
+        if pd.isna(raw_signal):
+            continue
+
+        signal = int(raw_signal)
+        if signal == 0:
+            effective_position = 0
+            continue
+
+        entering_or_reversing = signal != effective_position
+        if not entering_or_reversing:
+            effective_position = signal
+            continue
+
+        midline = df.loc[i, midline_col]
+        if not midline:
+            effective_position = signal
+            continue
+
+        fast_bias = df.loc[i, 'close'] / midline - 1
+        chase_condition = (
+                (signal == 1 and fast_bias > max_fast_bias)
+                or (signal == -1 and fast_bias < -max_fast_bias)
+        )
+        if chase_condition:
+            df.at[i, 'signal'] = 0
+            df.at[i, 'anti_chase_block_trigger'] = True
+            effective_position = 0
+        else:
+            effective_position = signal
+
+    return df
+
+
 def process_stop_loss_close(df, stop_loss_pct, leverage_rate):
     """
     止损函数
@@ -196,6 +245,7 @@ def process_stop_loss_close(df, stop_loss_pct, leverage_rate):
     '''
 
     # ===初始化持仓方向与开仓价格
+    df['stop_loss_trigger'] = False
     position = 0  # 持仓方向
     open_price = np.nan  # 开仓价格
 
@@ -221,6 +271,7 @@ def process_stop_loss_close(df, stop_loss_pct, leverage_rate):
             # 如果满足止损条件，并且当前的信号为空时将signal设置为0，避免覆盖其他信号
             if stop_loss_condition and np.isnan(df.loc[i, 'signal']):
                 df.at[i, 'signal'] = 0
+                df.at[i, 'stop_loss_trigger'] = True
                 position = 0
                 open_price = np.nan
 

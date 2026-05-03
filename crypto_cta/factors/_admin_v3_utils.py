@@ -511,5 +511,116 @@ def dc_flash_core(df, n):
     return df
 
 
+def adaptive_bolling_flash_core(df, n):
+    stop_loss_pct = 10
+    holding_times_min = 10
+    df["signal"] = np.nan
+    df["signal_long"] = np.nan
+    df["signal_short"] = np.nan
+    df["median"] = df["close"].rolling(n, min_periods=1).mean()
+    df["std"] = df["close"].rolling(n, min_periods=1).std(ddof=0)
+    df["z_score"] = (df["close"] - df["median"]).abs() / df["std"].replace(0, np.nan)
+    df["m"] = df["z_score"].rolling(n, min_periods=1).mean().shift()
+    df["upper"] = df["median"] + df["m"] * df["std"]
+    df["lower"] = df["median"] - df["m"] * df["std"]
+    df.bfill(inplace=True)
+    df["flash_stop_win"] = df["median"].copy()
+    df["mtm"] = df["close"] / df["close"].shift(n) - 1
+    df["atr"] = atr(df, n)
+
+    df.loc[
+        (df["close"] > df["upper"])
+        & (df["mtm"] > 0)
+        & (df["close"].shift(1) <= df["upper"].shift(1)),
+        "signal_long",
+    ] = 1
+    df.loc[
+        (df["close"] < df["median"])
+        & (df["close"].shift(1) >= df["median"].shift(1)),
+        "signal_long",
+    ] = 0
+    df.loc[
+        (df["close"] < df["lower"])
+        & (df["mtm"] < 0)
+        & (df["close"].shift(1) >= df["lower"].shift(1)),
+        "signal_short",
+    ] = -1
+    df.loc[
+        (df["close"] > df["median"])
+        & (df["close"].shift(1) <= df["median"].shift(1)),
+        "signal_short",
+    ] = 0
+
+    close_values = df["close"].to_numpy()
+    atr_values = df["atr"].to_numpy()
+    signal_values = df["signal"].to_numpy(copy=True)
+    signal_long_values = df["signal_long"].to_numpy(copy=True)
+    signal_short_values = df["signal_short"].to_numpy(copy=True)
+    flash_stop_win_values = df["flash_stop_win"].to_numpy(copy=True)
+    ma_cache = {
+        ma_temp: df["close"].rolling(ma_temp, min_periods=1).mean().to_numpy()
+        for ma_temp in dc_flash_ma_windows(n, holding_times_min)
+    }
+
+    info = {"pre_signal": 0, "stop_lose_price": None, "holding_times": 0, "stop_win_times": 0, "stop_win_price": 0}
+    for i in range(df.shape[0]):
+        if info["pre_signal"] == 0:
+            if signal_long_values[i] == 1:
+                signal_values[i] = 1
+                info = {"pre_signal": 1, "stop_lose_price": close_values[i] * (1 - stop_loss_pct / 100), "holding_times": 0, "stop_win_times": 0, "stop_win_price": 0}
+            elif signal_short_values[i] == -1:
+                signal_values[i] = -1
+                info = {"pre_signal": -1, "stop_lose_price": close_values[i] * (1 + stop_loss_pct / 100), "holding_times": 0, "stop_win_times": 0, "stop_win_price": 0}
+            else:
+                info = {"pre_signal": 0, "stop_lose_price": None, "holding_times": 0, "stop_win_times": 0, "stop_win_price": 0}
+        elif info["pre_signal"] == 1:
+            holding_times = info["holding_times"]
+            if atr_values[i] < atr_values[i - 1]:
+                info["holding_times"] = holding_times + 1
+            if close_values[i] > close_values[i - 1]:
+                info["holding_times"] = max(holding_times - 1, 0)
+            ma_temp = max(n - int(n / 50) * 10 * info["holding_times"], holding_times_min)
+            flash_stop_win_values[i] = ma_cache[ma_temp][i]
+            if close_values[i] < flash_stop_win_values[i]:
+                if close_values[i] > info["stop_win_price"] or info["stop_win_times"] == 0:
+                    info["stop_win_price"] = close_values[i]
+                    info["stop_win_times"] += 1
+                    info["holding_times"] = 0
+                else:
+                    signal_long_values[i] = 0
+            if signal_long_values[i] == 0 or close_values[i] < info["stop_lose_price"]:
+                signal_values[i] = 0
+                info = {"pre_signal": 0, "stop_lose_price": None, "holding_times": 0, "stop_win_times": 0, "stop_win_price": 0}
+            if signal_short_values[i] == -1:
+                signal_values[i] = -1
+                info = {"pre_signal": -1, "stop_lose_price": close_values[i] * (1 + stop_loss_pct / 100), "holding_times": 0, "stop_win_times": 0, "stop_win_price": 0}
+        elif info["pre_signal"] == -1:
+            holding_times = info["holding_times"]
+            if atr_values[i] < atr_values[i - 1]:
+                info["holding_times"] = holding_times + 1
+            if close_values[i] < close_values[i - 1]:
+                info["holding_times"] = max(holding_times - 1, 0)
+            ma_temp = max(n - int(n / 50) * 10 * info["holding_times"], holding_times_min)
+            flash_stop_win_values[i] = ma_cache[ma_temp][i]
+            if close_values[i] > flash_stop_win_values[i]:
+                if close_values[i] < info["stop_win_price"] or info["stop_win_times"] == 0:
+                    info["stop_win_price"] = close_values[i]
+                    info["stop_win_times"] += 1
+                    info["holding_times"] = 0
+                else:
+                    signal_short_values[i] = 0
+            if signal_short_values[i] == 0 or close_values[i] > info["stop_lose_price"]:
+                signal_values[i] = 0
+                info = {"pre_signal": 0, "stop_lose_price": None, "holding_times": 0, "stop_win_times": 0, "stop_win_price": 0}
+            if signal_long_values[i] == 1:
+                signal_values[i] = 1
+                info = {"pre_signal": 1, "stop_lose_price": close_values[i] * (1 - stop_loss_pct / 100), "holding_times": 0, "stop_win_times": 0, "stop_win_price": 0}
+    df["signal"] = signal_values
+    df["signal_long"] = signal_long_values
+    df["signal_short"] = signal_short_values
+    df["flash_stop_win"] = flash_stop_win_values
+    return df
+
+
 def default_para_list(n_list=range(10, 300, 10)):
     return [[n] for n in n_list]
