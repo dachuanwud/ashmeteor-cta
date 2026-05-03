@@ -841,11 +841,14 @@ def dapi_buy_coin():
     mode = request.args.get('mode')
     num = request.args.get('num')
     balance = request.args.get('balance')
+    hedge_ratio = request.args.get('hedge_ratio')
+    live_trade_enabled = request.args.get('live_trade_enabled', 0)
     exchange = get_exchange(binance_list, strategy)
     account_type = get_exchange_account_type(binance_list, strategy)
     res = make_response(
         jsonify(dapi_buy_coin_and_transfer(exchange, asset, mode, num,
-                                           balance, account_type)))
+                                           balance, account_type, strategy,
+                                           hedge_ratio, live_trade_enabled)))
     res = decorate_res(res)
     return res
 
@@ -857,11 +860,56 @@ def dapi_buy_coin_list():
     mode = request.args.get('mode')
     num = request.args.get('num')
     balance = request.args.get('balance')
+    hedge_ratio = request.args.get('hedge_ratio')
+    live_trade_enabled = request.args.get('live_trade_enabled', 0)
     exchange = get_exchange(binance_list, strategy)
     account_type = get_exchange_account_type(binance_list, strategy)
     res = make_response(
         jsonify(dapi_buy_coin_list_and_transfer(exchange, asset_lists, mode, num,
-                                   balance, account_type)))
+                                   balance, account_type, strategy,
+                                   hedge_ratio, live_trade_enabled)))
+    res = decorate_res(res)
+    return res
+
+
+@app.route('/cta/unified/margin_rebalance/create_or_update',
+           methods=['POST', 'OPTIONS'])
+def cta_unified_margin_rebalance_create_or_update():
+    if request.method == 'OPTIONS':
+        res = make_response(jsonify({'status': 0, 'msg': ''}))
+        res = decorate_res(res)
+        return res
+    data = request.get_json() or {}
+    res = make_response(jsonify(create_or_update_unified_margin_rebalance(
+        data.get('strategy'), data.get('asset'), data.get('hedge_ratio', '0.5'),
+        data.get('live_trade_enabled', 0))))
+    res = decorate_res(res)
+    return res
+
+
+@app.route('/cta/unified/margin_rebalance/list', methods=['GET'])
+def cta_unified_margin_rebalance_list():
+    strategy = request.args.get('strategy')
+    asset = request.args.get('asset')
+    res = make_response(jsonify(
+        cta_unified_margin_rebalance_get_list(binance_list, strategy, asset)))
+    res = decorate_res(res)
+    return res
+
+
+@app.route('/cta/unified/margin_rebalance/force',
+           methods=['POST', 'OPTIONS'])
+def cta_unified_margin_rebalance_force_route():
+    if request.method == 'OPTIONS':
+        res = make_response(jsonify({'status': 0, 'msg': ''}))
+        res = decorate_res(res)
+        return res
+    data = request.get_json() or {}
+    strategy = data.get('strategy')
+    asset = data.get('asset')
+    exchange = get_exchange(binance_list, strategy)
+    res = make_response(jsonify(
+        cta_unified_margin_rebalance_force(exchange, strategy, asset)))
     res = decorate_res(res)
     return res
 

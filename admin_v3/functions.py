@@ -1,14 +1,17 @@
 from datetime import datetime, timedelta
 import ccxt
-from decimal import Decimal
+from decimal import Decimal, ROUND_DOWN
 from multiprocessing import Pool
 from sqlalchemy import create_engine
+from flask import has_app_context
 from config import debug, amis_edit_origin, local_origin, proxy, sql_uri, wechat_hook_key, auto_add_re
 from factors import *
 import factors
-from model import CtaUsdt, CtaUsd, CtaUsdRebalance, Strategy, LongBlackList, ShortBlackList
+from model import (CtaUnifiedMarginRebalance, CtaUsdt, CtaUsd,
+                   CtaUsdRebalance, Strategy, LongBlackList, ShortBlackList)
 from exts import db
-from binance_account import ACCOUNT_TYPE_STANDARD, make_binance_account_adapter
+from binance_account import (ACCOUNT_TYPE_STANDARD, ACCOUNT_TYPE_UNIFIED,
+                             make_binance_account_adapter)
 import time
 import json
 import pandas as pd
@@ -5881,7 +5884,10 @@ def dapi_buy_coin_list_and_transfer(exchange,
                                     mode,
                                     num,
                                     balance,
-                                    account_type=ACCOUNT_TYPE_STANDARD):
+                                    account_type=ACCOUNT_TYPE_STANDARD,
+                                    strategy=None,
+                                    hedge_ratio=None,
+                                    live_trade_enabled=0):
     asset_lists = asset_lists or ''
     mode = mode or ''
     num = num or ''
@@ -5906,7 +5912,8 @@ def dapi_buy_coin_list_and_transfer(exchange,
     for asset in asset_lists:
         try:
             res = dapi_buy_coin_and_transfer(exchange, asset, mode, num,
-                                             balance, account_type)
+                                             balance, account_type, strategy,
+                                             hedge_ratio, live_trade_enabled)
             if res['status'] == 0:
                 msg['msg'].append(f'{asset}购买并转入币本位成功')
             else:
@@ -5919,6 +5926,259 @@ def dapi_buy_coin_list_and_transfer(exchange,
             msg['msg'].append(f'{asset}购买并转入币本位失败')
 
     return msg
+
+
+def decimal_to_step(value, step_size):
+    value = Decimal(str(value))
+    step_size = Decimal(str(step_size))
+    if step_size <= 0:
+        return value
+    return (value / step_size).to_integral_value(rounding=ROUND_DOWN) * step_size
+
+
+def decimal_to_step_string(value, step_size):
+    value = decimal_to_step(value, step_size)
+    return format(value.quantize(Decimal(str(step_size))), 'f')
+
+
+def get_um_symbol_trade_rules(exchange, symbol):
+    exchange_info = get_fapi_public_exchange_info(exchange)
+    matched = None
+    for item in exchange_info.get('symbols', []):
+        if item.get('symbol') == symbol and item.get('status') == 'TRADING':
+            matched = item
+            break
+    if matched is None:
+        return None
+
+    min_qty = Decimal('0')
+    step_size = Decimal('0.000001')
+    min_notional = Decimal('0')
+    for item_filter in matched.get('filters', []):
+        if item_filter.get('filterType') in ('MARKET_LOT_SIZE', 'LOT_SIZE'):
+            min_qty = Decimal(str(item_filter.get('minQty') or min_qty))
+            step_size = Decimal(str(item_filter.get('stepSize') or step_size))
+        elif item_filter.get('filterType') == 'MIN_NOTIONAL':
+            min_notional = Decimal(str(item_filter.get('notional')
+                                       or min_notional))
+    return {
+        'min_qty': min_qty,
+        'step_size': step_size,
+        'min_notional': min_notional,
+    }
+
+
+def get_um_position_amount(account, hedge_symbol):
+    positions = account.get_um_position_risk({'symbol': hedge_symbol})
+    for position in positions:
+        if position.get('symbol') == hedge_symbol:
+            return Decimal(str(position.get('positionAmt') or '0'))
+    return Decimal('0')
+
+
+def create_or_update_unified_margin_rebalance(strategy,
+                                              asset,
+                                              hedge_ratio='0.5',
+                                              live_trade_enabled=0,
+                                              last_buy_order_id=''):
+    asset = (asset or '').upper()
+    hedge_ratio = Decimal(str(hedge_ratio or '0.5'))
+    live_trade_enabled = 1 if str(live_trade_enabled) in ('1', 'true', 'True') else 0
+    item = CtaUnifiedMarginRebalance.query.filter(
+        CtaUnifiedMarginRebalance.strategy == strategy,
+        CtaUnifiedMarginRebalance.asset == asset,
+        CtaUnifiedMarginRebalance.is_del == 0).first()
+    if item is None:
+        item = CtaUnifiedMarginRebalance(strategy=strategy,
+                                         asset=asset,
+                                         spot_symbol=f'{asset}USDT',
+                                         hedge_symbol=f'{asset}USDT',
+                                         hedge_market='um')
+        db.session.add(item)
+
+    item.hedge_ratio = hedge_ratio
+    item.live_trade_enabled = live_trade_enabled
+    item.is_running = 1
+    if last_buy_order_id:
+        item.last_buy_order_id = str(last_buy_order_id)
+    db.session.commit()
+    return item.to_dict()
+
+
+def update_unified_margin_rebalance_state(strategy, asset, data):
+    if not has_app_context():
+        return
+    try:
+        asset = (asset or '').upper()
+        item = CtaUnifiedMarginRebalance.query.filter(
+            CtaUnifiedMarginRebalance.strategy == strategy,
+            CtaUnifiedMarginRebalance.asset == asset,
+            CtaUnifiedMarginRebalance.is_del == 0).first()
+        if item is None:
+            return
+        for key, value in data.items():
+            setattr(item, key, value)
+        db.session.commit()
+    except Exception as e:
+        log_print(f'{strategy} {asset}统一账户半套状态写入失败')
+        log_print(e)
+
+
+def rebalance_unified_margin_asset(exchange,
+                                   strategy,
+                                   asset,
+                                   hedge_ratio,
+                                   live_trade_enabled=False):
+    if exchange is None or not strategy or not asset:
+        return {'status': 500, 'msg': 'params error'}
+
+    asset = asset.upper()
+    hedge_symbol = f'{asset}USDT'
+    account = make_binance_account_adapter(exchange, ACCOUNT_TYPE_UNIFIED)
+    trade_rules = get_um_symbol_trade_rules(exchange, hedge_symbol)
+    if trade_rules is None:
+        msg = f'{hedge_symbol}不支持U本位半套'
+        update_unified_margin_rebalance_state(strategy, asset, {
+            'last_status': 500,
+            'last_msg': msg,
+        })
+        return {'status': 500, 'msg': msg}
+
+    balance = account.get_margin_asset_balance(asset)
+    asset_base_qty = balance['total']
+    target_base_qty = decimal_to_step(asset_base_qty * Decimal(str(hedge_ratio)),
+                                      trade_rules['step_size'])
+    current_position = get_um_position_amount(account, hedge_symbol)
+    target_position = -target_base_qty
+    order_delta = target_position - current_position
+    order_qty = decimal_to_step(abs(order_delta), trade_rules['step_size'])
+    hedged_base_qty = abs(current_position) if current_position < 0 else Decimal('0')
+
+    state = {
+        'target_base_qty': target_base_qty,
+        'hedged_base_qty': hedged_base_qty,
+        'last_rebalance_time': datetime.now(),
+    }
+
+    if order_qty < trade_rules['min_qty']:
+        msg = f'{hedge_symbol}半套差额{order_qty}小于最小下单量{trade_rules["min_qty"]}'
+        state.update({'last_status': 0, 'last_msg': msg})
+        update_unified_margin_rebalance_state(strategy, asset, state)
+        return {
+            'status': 0,
+            'msg': msg,
+            'data': {
+                'asset_qty': asset_base_qty,
+                'target_base_qty': target_base_qty,
+                'current_position': current_position,
+                'order_qty': order_qty,
+            }
+        }
+
+    side = 'SELL' if order_delta < 0 else 'BUY'
+    params = {
+        'symbol': hedge_symbol,
+        'side': side,
+        'type': 'MARKET',
+        'quantity': decimal_to_step_string(order_qty, trade_rules['step_size']),
+    }
+    if side == 'BUY':
+        params['reduceOnly'] = True
+
+    if not live_trade_enabled:
+        msg = '未开启真实下单，仅生成统一账户半套预览'
+        state.update({'last_status': 0, 'last_msg': msg})
+        update_unified_margin_rebalance_state(strategy, asset, state)
+        return {
+            'status': 0,
+            'msg': msg,
+            'data': {
+                'asset_qty': asset_base_qty,
+                'target_base_qty': target_base_qty,
+                'current_position': current_position,
+                'order': params,
+            }
+        }
+
+    try:
+        log_print(f'{strategy} {asset}统一账户U本位半套下单参数: {params}')
+        order = robust(func=account.place_um_order,
+                       params=params,
+                       func_name='rebalance_unified_margin_asset')
+        new_hedged_base_qty = target_base_qty
+        msg = '半套执行成功'
+        state.update({
+            'hedged_base_qty': new_hedged_base_qty,
+            'last_status': 0,
+            'last_msg': msg,
+        })
+        update_unified_margin_rebalance_state(strategy, asset, state)
+        return {
+            'status': 0,
+            'msg': msg,
+            'data': {
+                'asset_qty': asset_base_qty,
+                'target_base_qty': target_base_qty,
+                'current_position': current_position,
+                'order': params,
+                'order_result': order,
+            }
+        }
+    except Exception as e:
+        msg = f'半套执行失败: {e}'
+        state.update({'last_status': -1, 'last_msg': msg})
+        update_unified_margin_rebalance_state(strategy, asset, state)
+        return {'status': -1, 'msg': msg}
+
+
+def cta_unified_margin_rebalance_get_list(binance_list, strategy=None, asset=None):
+    query = CtaUnifiedMarginRebalance.query.filter(
+        CtaUnifiedMarginRebalance.is_del == 0)
+    if strategy:
+        query = query.filter(CtaUnifiedMarginRebalance.strategy == strategy)
+    if asset:
+        query = query.filter(CtaUnifiedMarginRebalance.asset == asset.upper())
+
+    items = []
+    for item in query.order_by(CtaUnifiedMarginRebalance.strategy,
+                               CtaUnifiedMarginRebalance.asset).all():
+        row = item.to_dict()
+        exchange = get_exchange(binance_list, item.strategy)
+        if exchange is not None:
+            try:
+                account = make_binance_account_adapter(exchange,
+                                                       ACCOUNT_TYPE_UNIFIED)
+                balance = account.get_margin_asset_balance(item.asset)
+                position = get_um_position_amount(account, item.hedge_symbol)
+                row['asset_base_qty'] = balance['total']
+                row['current_um_position'] = position
+                row['position_gap'] = -Decimal(str(item.target_base_qty)) - position
+            except Exception as e:
+                row['preview_error'] = str(e)
+        items.append(row)
+    return {
+        'status': 0,
+        'msg': '',
+        'data': {
+            'items': items,
+            'total': len(items),
+        }
+    }
+
+
+def cta_unified_margin_rebalance_force(exchange, strategy, asset):
+    item = CtaUnifiedMarginRebalance.query.filter(
+        CtaUnifiedMarginRebalance.strategy == strategy,
+        CtaUnifiedMarginRebalance.asset == (asset or '').upper(),
+        CtaUnifiedMarginRebalance.is_del == 0).first()
+    if item is None:
+        return {'status': 500, 'msg': '统一账户买币半套配置不存在'}
+    if item.is_running != 1:
+        return {'status': 500, 'msg': '统一账户买币半套未启用'}
+    if item.live_trade_enabled != 1:
+        return {'status': 500, 'msg': '未开启真实下单'}
+    return rebalance_unified_margin_asset(exchange, strategy, item.asset,
+                                          item.hedge_ratio, True)
 
 
 def dapi_buy_coin_with_unified_account(exchange, asset, usd_num):
@@ -5953,6 +6213,8 @@ def dapi_buy_coin_with_unified_account(exchange, asset, usd_num):
         return {
             'status': 0,
             'msg': f'统一账户买入{asset}成功，成交数量约 {qty}',
+            'order_id': res.get('orderId', ''),
+            'executed_qty': str(qty),
         }
     except Exception as e:
         log_print(f'统一账户购买{asset}失败')
@@ -5965,7 +6227,10 @@ def dapi_buy_coin_and_transfer(exchange,
                                mode,
                                num,
                                balance,
-                               account_type=ACCOUNT_TYPE_STANDARD):
+                               account_type=ACCOUNT_TYPE_STANDARD,
+                               strategy=None,
+                               hedge_ratio=None,
+                               live_trade_enabled=0):
     if exchange is None or asset == '' or mode == '' or num == '':
         return {
             'status': 500,
@@ -5993,7 +6258,22 @@ def dapi_buy_coin_and_transfer(exchange,
         }
 
     if account_type == 'unified':
-        return dapi_buy_coin_with_unified_account(exchange, asset, usd_num)
+        res = dapi_buy_coin_with_unified_account(exchange, asset, usd_num)
+        if res.get('status') != 0:
+            return res
+        if strategy and hedge_ratio not in (None, ''):
+            record = create_or_update_unified_margin_rebalance(
+                strategy=strategy,
+                asset=asset,
+                hedge_ratio=hedge_ratio,
+                live_trade_enabled=live_trade_enabled,
+                last_buy_order_id=res.get('order_id', ''))
+            rebalance = rebalance_unified_margin_asset(
+                exchange, strategy, asset, Decimal(str(hedge_ratio)),
+                str(live_trade_enabled) in ('1', 'true', 'True'))
+            res['rebalance_record'] = record
+            res['rebalance'] = rebalance
+        return res
 
     ticker = exchange.public_get_ticker_price({'symbol':
                                                    f'{asset}USDT'})['price']

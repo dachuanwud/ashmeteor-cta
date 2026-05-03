@@ -1,6 +1,7 @@
 import unittest
 import os
 import sys
+from decimal import Decimal
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
@@ -256,6 +257,17 @@ class BinanceAccountAdapterTest(unittest.TestCase):
         self.assertIn(('papi_account', None), exchange.calls)
         self.assertIn(('papi_balance', None), exchange.calls)
         self.assertIn(('papi_um_position_risk', {}), exchange.calls)
+
+    def test_unified_account_reads_margin_asset_balance(self):
+        exchange = FakeExchange()
+        adapter = make_binance_account_adapter(exchange, ACCOUNT_TYPE_UNIFIED)
+
+        balance = adapter.get_margin_asset_balance('ETH')
+
+        self.assertEqual(balance['asset'], 'ETH')
+        self.assertEqual(balance['total'], Decimal('2.2'))
+        self.assertEqual(balance['free'], Decimal('2.2'))
+        self.assertIn(('papi_balance', None), exchange.calls)
 
     def test_standard_account_reads_legacy_summary_and_um_positions(self):
         exchange = FakeExchange()

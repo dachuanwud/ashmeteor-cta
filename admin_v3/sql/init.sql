@@ -142,3 +142,26 @@ CREATE TABLE `cta_usd_rebalance` (
   UNIQUE KEY `cta_key` (`cta_key`) USING BTREE COMMENT 'cta策略唯一标志key'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
 ;
+
+CREATE TABLE `cta_unified_margin_rebalance` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT COMMENT 'ID',
+  `strategy` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL DEFAULT '' COMMENT '策略账户名称',
+  `asset` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL DEFAULT '' COMMENT '现货/杠杆资产',
+  `spot_symbol` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL DEFAULT '' COMMENT '买币交易对',
+  `hedge_symbol` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL DEFAULT '' COMMENT 'U本位半套交易对',
+  `hedge_market` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL DEFAULT 'um' COMMENT '半套市场类型',
+  `hedge_ratio` decimal(10,4) unsigned NOT NULL DEFAULT '0.5000' COMMENT '半套比例',
+  `target_base_qty` decimal(20,8) unsigned NOT NULL DEFAULT '0.00000000' COMMENT '目标基础币数量',
+  `hedged_base_qty` decimal(20,8) unsigned NOT NULL DEFAULT '0.00000000' COMMENT '已半套基础币数量',
+  `is_running` tinyint unsigned NOT NULL DEFAULT '1' COMMENT '是否启用',
+  `live_trade_enabled` tinyint unsigned NOT NULL DEFAULT '0' COMMENT '是否允许真实下单',
+  `last_buy_order_id` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL DEFAULT '' COMMENT '最近买币订单ID',
+  `last_rebalance_time` datetime DEFAULT NULL COMMENT '最近半套时间',
+  `last_status` int NOT NULL DEFAULT '0' COMMENT '最近执行状态',
+  `last_msg` varchar(512) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL DEFAULT '' COMMENT '最近执行信息',
+  `is_del` tinyint unsigned NOT NULL DEFAULT '0' COMMENT '是否软删除',
+  `update_time` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '上次更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_strategy_asset` (`strategy`,`asset`) USING BTREE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+;

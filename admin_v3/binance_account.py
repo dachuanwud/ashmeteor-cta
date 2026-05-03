@@ -61,6 +61,52 @@ class BinanceAccountAdapter:
             assets.append(normalized)
         return assets
 
+    def get_margin_asset_balance(self, asset):
+        asset = (asset or '').upper()
+        if self.is_unified:
+            for item in self.get_balance_assets():
+                if item.get('asset') != asset:
+                    continue
+                total = Decimal(str(item.get('totalWalletBalance')
+                                    or item.get('crossMarginFree')
+                                    or item.get('walletBalance') or '0'))
+                free = Decimal(str(item.get('crossMarginFree')
+                                   or item.get('totalAvailableBalance')
+                                   or item.get('totalWalletBalance')
+                                   or item.get('walletBalance') or total))
+                return {
+                    'asset': asset,
+                    'total': total,
+                    'free': free,
+                    'raw': item,
+                }
+            return {
+                'asset': asset,
+                'total': Decimal('0'),
+                'free': Decimal('0'),
+                'raw': {},
+            }
+
+        account = self._call_exchange(('private_get_account',
+                                       'privateGetAccount'))
+        for item in account.get('balances', []):
+            if item.get('asset') != asset:
+                continue
+            free = Decimal(str(item.get('free') or '0'))
+            locked = Decimal(str(item.get('locked') or '0'))
+            return {
+                'asset': asset,
+                'total': free + locked,
+                'free': free,
+                'raw': item,
+            }
+        return {
+            'asset': asset,
+            'total': Decimal('0'),
+            'free': Decimal('0'),
+            'raw': {},
+        }
+
     def get_cm_account(self):
         if self.is_unified:
             return {

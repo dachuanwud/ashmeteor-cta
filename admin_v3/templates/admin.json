@@ -2762,21 +2762,39 @@
                                                   "required": true,
                                                   "value": "normal"
                                                 },
-                                                {
-                                                  "type": "input-number",
-                                                  "label": "买币参数",
-                                                  "name": "num",
-                                                  "id": "u:a9a01e5ae1f5",
-                                                  "step": 1,
-                                                  "displayMode": "base",
-                                                  "min": 10
-                                                }
-                                              ],
-                                              "api": {
-                                                "method": "get",
-                                                "url": "/dapi/buy_coin?strategy=${strategy}&asset=${asset}&mode=${mode}&num=${num}&balance=${margin_balance_usd}"
-                                              }
-                                            }
+	                                                {
+	                                                  "type": "input-number",
+	                                                  "label": "买币参数",
+	                                                  "name": "num",
+	                                                  "id": "u:a9a01e5ae1f5",
+	                                                  "step": 1,
+	                                                  "displayMode": "base",
+	                                                  "min": 10
+	                                                },
+	                                                {
+	                                                  "type": "input-number",
+	                                                  "label": "统一账户半套比例",
+	                                                  "name": "hedge_ratio",
+	                                                  "id": "u:9f5c4fd0f6b1",
+	                                                  "step": 0.1,
+	                                                  "value": 0.5,
+	                                                  "min": 0
+	                                                },
+	                                                {
+	                                                  "type": "switch",
+	                                                  "label": "统一账户真实半套下单",
+	                                                  "name": "live_trade_enabled",
+	                                                  "id": "u:85d343c66392",
+	                                                  "trueValue": 1,
+	                                                  "falseValue": 0,
+	                                                  "value": 0
+	                                                }
+	                                              ],
+	                                              "api": {
+	                                                "method": "get",
+	                                                "url": "/dapi/buy_coin?strategy=${strategy}&asset=${asset}&mode=${mode}&num=${num}&balance=${margin_balance_usd}&hedge_ratio=${hedge_ratio}&live_trade_enabled=${live_trade_enabled}"
+	                                              }
+	                                            }
                                           ],
                                           "showCloseButton": true,
                                           "showErrorMsg": true,
@@ -5675,11 +5693,102 @@
                               ]
                             }
                           },
-                          {
-                            "type": "crud",
-                            "api": {
-                              "method": "get",
-                              "url": "/account_management/balance"
+	                          {
+	                            "type": "crud",
+	                            "title": "统一账户买币半套",
+	                            "api": {
+	                              "method": "get",
+	                              "url": "/cta/unified/margin_rebalance/list"
+	                            },
+	                            "id": "u:aa1a1f85ac02",
+	                            "syncLocation": false,
+	                            "columns": [
+	                              {
+	                                "name": "strategy",
+	                                "label": "账户",
+	                                "type": "text",
+	                                "id": "u:bd3648507a29"
+	                              },
+	                              {
+	                                "name": "asset",
+	                                "label": "资产",
+	                                "type": "text",
+	                                "id": "u:feab496ff101"
+	                              },
+	                              {
+	                                "name": "hedge_symbol",
+	                                "label": "U本位半套标的",
+	                                "type": "text",
+	                                "id": "u:475ec9c1eb8f"
+	                              },
+	                              {
+	                                "name": "asset_base_qty",
+	                                "label": "现货数量",
+	                                "type": "text",
+	                                "id": "u:a48355fd5784"
+	                              },
+	                              {
+	                                "name": "target_base_qty",
+	                                "label": "目标空头",
+	                                "type": "text",
+	                                "id": "u:e269c0c8d8cb"
+	                              },
+	                              {
+	                                "name": "current_um_position",
+	                                "label": "当前U本位仓位",
+	                                "type": "text",
+	                                "id": "u:5dc1fb59074f"
+	                              },
+	                              {
+	                                "name": "position_gap",
+	                                "label": "仓位差额",
+	                                "type": "text",
+	                                "id": "u:c92278719bcf"
+	                              },
+	                              {
+	                                "name": "hedge_ratio",
+	                                "label": "半套比例",
+	                                "type": "text",
+	                                "id": "u:8ded70557401"
+	                              },
+	                              {
+	                                "name": "live_trade_enabled",
+	                                "label": "真实下单",
+	                                "type": "text",
+	                                "id": "u:b3649b988307"
+	                              },
+	                              {
+	                                "name": "last_msg",
+	                                "label": "最近结果",
+	                                "type": "text",
+	                                "id": "u:3c2832c089bd"
+	                              }
+	                            ],
+	                            "itemActions": [
+	                              {
+	                                "type": "button",
+	                                "label": "执行半套",
+	                                "level": "warning",
+	                                "confirmText": "确定要执行统一账户U本位半套真实下单？",
+	                                "actionType": "ajax",
+	                                "api": {
+	                                  "method": "post",
+	                                  "url": "/cta/unified/margin_rebalance/force",
+	                                  "data": {
+	                                    "strategy": "${strategy}",
+	                                    "asset": "${asset}"
+	                                  }
+	                                },
+	                                "id": "u:f4df675db42b"
+	                              }
+	                            ],
+	                            "bulkActions": []
+	                          },
+	                          {
+	                            "type": "crud",
+	                            "api": {
+	                              "method": "get",
+	                              "url": "/account_management/balance"
                             },
                             "id": "u:0405d7544da2",
                             "syncLocation": false,

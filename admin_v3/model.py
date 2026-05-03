@@ -434,3 +434,77 @@ class CtaUsdRebalance(db.Model):
         nullable=False,
         server_default=text("CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"),
         comment='上次更新时间')
+
+
+class CtaUnifiedMarginRebalance(db.Model):
+    __tablename__ = 'cta_unified_margin_rebalance'
+
+    def to_dict(self):
+        return {
+            c.name: getattr(self, c.name, None)
+            for c in self.__table__.columns
+        }
+
+    id = Column(INTEGER, primary_key=True, comment='ID')
+    strategy = Column(VARCHAR(255),
+                      nullable=False,
+                      server_default=text("''"),
+                      comment='策略账户名称')
+    asset = Column(VARCHAR(64),
+                   nullable=False,
+                   server_default=text("''"),
+                   comment='现货/杠杆资产')
+    spot_symbol = Column(VARCHAR(64),
+                         nullable=False,
+                         server_default=text("''"),
+                         comment='买币交易对')
+    hedge_symbol = Column(VARCHAR(64),
+                          nullable=False,
+                          server_default=text("''"),
+                          comment='U本位半套交易对')
+    hedge_market = Column(VARCHAR(32),
+                          nullable=False,
+                          server_default=text("'um'"),
+                          comment='半套市场类型')
+    hedge_ratio = Column(DECIMAL(10, 4),
+                         nullable=False,
+                         server_default=text("'0.5000'"),
+                         comment='半套比例')
+    target_base_qty = Column(DECIMAL(20, 8),
+                             nullable=False,
+                             server_default=text("'0.00000000'"),
+                             comment='目标基础币数量')
+    hedged_base_qty = Column(DECIMAL(20, 8),
+                             nullable=False,
+                             server_default=text("'0.00000000'"),
+                             comment='已半套基础币数量')
+    is_running = Column(TINYINT,
+                        nullable=False,
+                        server_default=text("'1'"),
+                        comment='是否启用')
+    live_trade_enabled = Column(TINYINT,
+                                nullable=False,
+                                server_default=text("'0'"),
+                                comment='是否允许真实下单')
+    last_buy_order_id = Column(VARCHAR(128),
+                               nullable=False,
+                               server_default=text("''"),
+                               comment='最近买币订单ID')
+    last_rebalance_time = Column(DateTime, comment='最近半套时间')
+    last_status = Column(INTEGER,
+                         nullable=False,
+                         server_default=text("'0'"),
+                         comment='最近执行状态')
+    last_msg = Column(VARCHAR(512),
+                      nullable=False,
+                      server_default=text("''"),
+                      comment='最近执行信息')
+    is_del = Column(TINYINT,
+                    nullable=False,
+                    server_default=text("'0'"),
+                    comment='是否软删除')
+    update_time = Column(
+        TIMESTAMP,
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"),
+        comment='上次更新时间')

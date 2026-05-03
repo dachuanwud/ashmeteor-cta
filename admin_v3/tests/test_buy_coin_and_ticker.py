@@ -1,6 +1,7 @@
 import os
 import sys
 import unittest
+from decimal import Decimal
 from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
@@ -8,7 +9,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from functions import (dapi_buy_coin_list_and_transfer,
                        dapi_buy_coin_and_transfer,
                        fetch_binance_dapi_ticker_data,
-                       fetch_binance_ticker_data)
+                       fetch_binance_ticker_data,
+                       rebalance_unified_margin_asset)
 
 
 class TickerExchange:
@@ -59,6 +61,57 @@ class UnifiedBuyCoinExchange:
         }
 
 
+class UnifiedMarginRebalanceExchange(UnifiedBuyCoinExchange):
+    def __init__(self, asset_qty='2', position_amt='-0.4'):
+        super().__init__()
+        self.asset_qty = asset_qty
+        self.position_amt = position_amt
+
+    def papiGetBalance(self):
+        return [{
+            'asset': 'ETH',
+            'totalWalletBalance': self.asset_qty,
+            'crossMarginFree': self.asset_qty,
+        }]
+
+    def papiGetUmPositionRisk(self, params=None):
+        return [{
+            'symbol': 'ETHUSDT',
+            'positionAmt': self.position_amt,
+        }]
+
+    def fapiPublic_get_exchangeinfo(self):
+        return {
+            'symbols': [{
+                'symbol': 'ETHUSDT',
+                'status': 'TRADING',
+                'filters': [{
+                    'filterType': 'PRICE_FILTER',
+                    'tickSize': '0.01',
+                }, {
+                    'filterType': 'MARKET_LOT_SIZE',
+                    'minQty': '0.001',
+                    'stepSize': '0.001',
+                }, {
+                    'filterType': 'MIN_NOTIONAL',
+                    'notional': '5',
+                }],
+            }]
+        }
+
+    def fapiPublicGetTicker24hr(self, params=None):
+        return {'symbol': 'ETHUSDT', 'lastPrice': '2500'}
+
+    def papiPostUmOrder(self, params=None):
+        self.orders.append(params)
+        return {'orderId': 'hedge-1'}
+
+
+class UnifiedMarginNoHedgeSymbolExchange(UnifiedMarginRebalanceExchange):
+    def fapiPublic_get_exchangeinfo(self):
+        return {'symbols': []}
+
+
 class BuyCoinAndTickerTest(unittest.TestCase):
     def test_buy_coin_list_does_not_import_removed_urllib_unquote(self):
         with patch('functions.dapi_buy_coin_and_transfer',
@@ -97,6 +150,71 @@ class BuyCoinAndTickerTest(unittest.TestCase):
         self.assertEqual(exchange.orders[0]['side'], 'BUY')
         self.assertEqual(exchange.orders[0]['type'], 'MARKET')
         self.assertEqual(str(exchange.orders[0]['quoteOrderQty']), '10.00')
+
+    def test_unified_buy_coin_can_create_record_and_trigger_um_rebalance(self):
+        exchange = UnifiedBuyCoinExchange()
+
+        with patch('functions.create_or_update_unified_margin_rebalance',
+                   return_value={'id': 1}) as create_record, \
+                patch('functions.rebalance_unified_margin_asset',
+                      return_value={'status': 0, 'msg': '半套执行成功'}) as rebalance:
+            res = dapi_buy_coin_and_transfer(exchange, 'ETH', 'normal', '10',
+                                             '', 'unified',
+                                             strategy='acct',
+                                             hedge_ratio='0.5',
+                                             live_trade_enabled=1)
+
+        self.assertEqual(res['status'], 0)
+        create_record.assert_called_once()
+        rebalance.assert_called_once_with(exchange, 'acct', 'ETH',
+                                          Decimal('0.5'), True)
+        self.assertEqual(res['rebalance']['msg'], '半套执行成功')
+
+    def test_unified_margin_rebalance_sells_um_when_short_is_below_target(self):
+        exchange = UnifiedMarginRebalanceExchange(asset_qty='2',
+                                                  position_amt='-0.4')
+
+        res = rebalance_unified_margin_asset(exchange, 'acct', 'ETH',
+                                             Decimal('0.5'), True)
+
+        self.assertEqual(res['status'], 0)
+        self.assertEqual(exchange.orders[0]['symbol'], 'ETHUSDT')
+        self.assertEqual(exchange.orders[0]['side'], 'SELL')
+        self.assertEqual(exchange.orders[0]['type'], 'MARKET')
+        self.assertEqual(str(exchange.orders[0]['quantity']), '0.600')
+
+    def test_unified_margin_rebalance_buys_reduce_only_when_short_is_above_target(self):
+        exchange = UnifiedMarginRebalanceExchange(asset_qty='1',
+                                                  position_amt='-0.8')
+
+        res = rebalance_unified_margin_asset(exchange, 'acct', 'ETH',
+                                             Decimal('0.5'), True)
+
+        self.assertEqual(res['status'], 0)
+        self.assertEqual(exchange.orders[0]['side'], 'BUY')
+        self.assertTrue(exchange.orders[0]['reduceOnly'])
+        self.assertEqual(str(exchange.orders[0]['quantity']), '0.300')
+
+    def test_unified_margin_rebalance_skips_below_min_quantity(self):
+        exchange = UnifiedMarginRebalanceExchange(asset_qty='0.001',
+                                                  position_amt='0')
+
+        res = rebalance_unified_margin_asset(exchange, 'acct', 'ETH',
+                                             Decimal('0.5'), True)
+
+        self.assertEqual(res['status'], 0)
+        self.assertIn('小于最小下单量', res['msg'])
+        self.assertEqual(exchange.orders, [])
+
+    def test_unified_margin_rebalance_rejects_missing_um_symbol(self):
+        exchange = UnifiedMarginNoHedgeSymbolExchange()
+
+        res = rebalance_unified_margin_asset(exchange, 'acct', 'ETH',
+                                             Decimal('0.5'), True)
+
+        self.assertEqual(res['status'], 500)
+        self.assertIn('ETHUSDT不支持U本位半套', res['msg'])
+        self.assertEqual(exchange.orders, [])
 
     def test_fetch_um_tickers_only_converts_last_price_to_numeric(self):
         prices = fetch_binance_ticker_data(TickerExchange())
