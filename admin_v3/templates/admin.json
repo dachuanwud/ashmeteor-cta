@@ -19,7 +19,33 @@
                     "source": "/account/list",
                     "size": "sm",
                     "searchable": true,
-                    "multiple": false
+                    "multiple": false,
+                    "onEvent": {
+                      "change": {
+                        "actions": [
+                          {
+                            "componentId": "u:account_topology_summary",
+                            "args": {},
+                            "actionType": "reload"
+                          },
+                          {
+                            "componentId": "u:account_topology_wallets",
+                            "args": {},
+                            "actionType": "reload"
+                          },
+                          {
+                            "componentId": "u:account_topology_positions",
+                            "args": {},
+                            "actionType": "reload"
+                          },
+                          {
+                            "componentId": "u:account_topology_exposures",
+                            "args": {},
+                            "actionType": "reload"
+                          }
+                        ]
+                      }
+                    }
                   },
                   {
                     "type": "button",
