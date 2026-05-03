@@ -18,6 +18,38 @@ scheduler = APScheduler()
 base_bnb_dict = {}
 
 
+def _read_ledger_table(engine, table_name):
+    return read_sql_compatible(engine,
+                               f'select * from {table_name}',
+                               index_col='index')
+
+
+def _write_ledger_rows(engine, table_name, df):
+    return to_sql_compatible(df,
+                             engine,
+                             name=table_name,
+                             if_exists='append',
+                             index=True)
+
+
+def _append_ledger_row(df, row):
+    return pd.concat([df, pd.DataFrame([row])], ignore_index=True)
+
+
+def _concat_ledger_frame(df, addition):
+    if addition.empty:
+        return df
+    return pd.concat([df, addition], ignore_index=True)
+
+
+def _get_um_margin_balance(exchange, account_type=ACCOUNT_TYPE_STANDARD):
+    account = make_binance_account_adapter(exchange, account_type)
+    summary = account.get_account_summary()
+    return float(summary.get('accountEquity')
+                 or summary.get('totalMarginBalance')
+                 or summary.get('raw', {}).get('totalMarginBalance') or 0)
+
+
 def account_net_value(*args):
     engine = create_engine(sql_uri)
     all_usd_in = 0
@@ -32,34 +64,26 @@ def account_net_value(*args):
         all_usd_in += usd_in
         all_usd_out += usd_out
         # 获取账户当前的净值
-        account_info = exchange.fapiPrivateV2_get_account()
-        totalMarginBalance = float(account_info['totalMarginBalance'])
+        totalMarginBalance = _get_um_margin_balance(
+            exchange, binance.get('account_type', ACCOUNT_TYPE_STANDARD))
         all_account_margin_balance += totalMarginBalance
 
-        sql = f'select * from {strategy}_value'
         try:
-            df = pd.read_sql(sql, con=engine, index_col='index')
+            df = _read_ledger_table(engine, f'{strategy}_value')
         except:
             df = pd.DataFrame()
 
-        df = df.append(
-            {
+        df = _append_ledger_row(
+            df, {
                 'candle_begin_time':
                 datetime.now().replace(second=0, microsecond=0),
-                'net_value':
-                float(totalMarginBalance),
-                'usd_in':
-                float(usd_in),
-                'usd_out':
-                float(usd_out),
-                'init_value':
-                0.0,
-                'accumulate_value':
-                1.0,
-                'pct_change':
-                1.0
-            },
-            ignore_index=True)
+                'net_value': float(totalMarginBalance),
+                'usd_in': float(usd_in),
+                'usd_out': float(usd_out),
+                'init_value': 0.0,
+                'accumulate_value': 1.0,
+                'pct_change': 1.0
+            })
         if len(df) <= 1:
             df.iloc[0, df.columns.get_loc('init_value')] = totalMarginBalance
         else:
@@ -72,20 +96,16 @@ def account_net_value(*args):
             df.iloc[-1, df.columns.get_loc('accumulate_value')] = df.iloc[-2][
                 'accumulate_value'] * df.iloc[-1]['pct_change']
         df = df[-1:]
-        df.to_sql(name=f'{strategy}_value',
-                  con=engine,
-                  if_exists='append',
-                  index=True)
+        _write_ledger_rows(engine, f'{strategy}_value', df)
 
     # 主账户合并
-    sql = f'select * from all_account_value'
     try:
-        df = pd.read_sql(sql, con=engine, index_col='index')
+        df = _read_ledger_table(engine, 'all_account_value')
     except:
         df = pd.DataFrame()
 
-    df = df.append(
-        {
+    df = _append_ledger_row(
+        df, {
             'candle_begin_time': datetime.now().replace(second=0,
                                                         microsecond=0),
             'net_value': float(all_account_margin_balance),
@@ -94,8 +114,7 @@ def account_net_value(*args):
             'init_value': 0.0,
             'accumulate_value': 1.0,
             'pct_change': 1.0
-        },
-        ignore_index=True)
+        })
     if len(df) <= 1:
         df.iloc[0,
                 df.columns.get_loc('init_value')] = all_account_margin_balance
@@ -109,10 +128,7 @@ def account_net_value(*args):
         df.iloc[-1, df.columns.get_loc('accumulate_value')] = df.iloc[-2][
             'accumulate_value'] * df.iloc[-1]['pct_change']
     df = df[-1:]
-    df.to_sql(name=f'all_account_value',
-              con=engine,
-              if_exists='append',
-              index=True)
+    _write_ledger_rows(engine, 'all_account_value', df)
 
 
 def total_account_net_value(*args):
@@ -139,14 +155,13 @@ def total_account_net_value(*args):
             continue
 
     # 主账户合并
-    sql = f'select * from total_binance_account_value'
     try:
-        df = pd.read_sql(sql, con=engine, index_col='index')
+        df = _read_ledger_table(engine, 'total_binance_account_value')
     except:
         df = pd.DataFrame()
 
-    df = df.append(
-        {
+    df = _append_ledger_row(
+        df, {
             'candle_begin_time': datetime.now(),
             'net_value': float(account_total),
             'usd_in': float(all_usd_in),
@@ -154,8 +169,7 @@ def total_account_net_value(*args):
             'init_value': 0.0,
             'accumulate_value': 1.0,
             'pct_change': 1.0
-        },
-        ignore_index=True)
+        })
     if len(df) <= 1:
         df.iloc[0, df.columns.get_loc('init_value')] = account_total
     else:
@@ -168,10 +182,7 @@ def total_account_net_value(*args):
         df.iloc[-1, df.columns.get_loc('accumulate_value')] = df.iloc[-2][
             'accumulate_value'] * df.iloc[-1]['pct_change']
     df = df[-1:]
-    df.to_sql(name=f'total_binance_account_value',
-              con=engine,
-              if_exists='append',
-              index=True)
+    _write_ledger_rows(engine, 'total_binance_account_value', df)
 
 
 def dapi_account_net_value(*args):
@@ -199,30 +210,22 @@ def dapi_account_net_value(*args):
             continue
         all_account_margin_balance += margin_balance_usd
 
-        sql = f'select * from dapi_{strategy}_value'
         try:
-            df = pd.read_sql(sql, con=engine, index_col='index')
+            df = _read_ledger_table(engine, f'dapi_{strategy}_value')
         except:
             df = pd.DataFrame()
 
-        df = df.append(
-            {
+        df = _append_ledger_row(
+            df, {
                 'candle_begin_time':
                 datetime.now().replace(second=0, microsecond=0),
-                'net_value':
-                float(margin_balance_usd),
-                'usd_in':
-                float(usd_in),
-                'usd_out':
-                float(usd_out),
-                'init_value':
-                0.0,
-                'accumulate_value':
-                1.0,
-                'pct_change':
-                1.0
-            },
-            ignore_index=True)
+                'net_value': float(margin_balance_usd),
+                'usd_in': float(usd_in),
+                'usd_out': float(usd_out),
+                'init_value': 0.0,
+                'accumulate_value': 1.0,
+                'pct_change': 1.0
+            })
         if len(df) <= 1:
             df.iloc[0, df.columns.get_loc('init_value')] = margin_balance_usd
         else:
@@ -235,20 +238,16 @@ def dapi_account_net_value(*args):
             df.iloc[-1, df.columns.get_loc('accumulate_value')] = df.iloc[-2][
                 'accumulate_value'] * df.iloc[-1]['pct_change']
         df = df[-1:]
-        df.to_sql(name=f'dapi_{strategy}_value',
-                  con=engine,
-                  if_exists='append',
-                  index=True)
+        _write_ledger_rows(engine, f'dapi_{strategy}_value', df)
 
     # 主账户合并
-    sql = f'select * from dapi_all_account_value'
     try:
-        df = pd.read_sql(sql, con=engine, index_col='index')
+        df = _read_ledger_table(engine, 'dapi_all_account_value')
     except:
         df = pd.DataFrame()
 
-    df = df.append(
-        {
+    df = _append_ledger_row(
+        df, {
             'candle_begin_time': datetime.now().replace(second=0,
                                                         microsecond=0),
             'net_value': float(all_account_margin_balance),
@@ -257,8 +256,7 @@ def dapi_account_net_value(*args):
             'init_value': 0.0,
             'accumulate_value': 1.0,
             'pct_change': 1.0
-        },
-        ignore_index=True)
+        })
     if len(df) <= 1:
         df.iloc[0,
                 df.columns.get_loc('init_value')] = all_account_margin_balance
@@ -272,10 +270,7 @@ def dapi_account_net_value(*args):
         df.iloc[-1, df.columns.get_loc('accumulate_value')] = df.iloc[-2][
             'accumulate_value'] * df.iloc[-1]['pct_change']
     df = df[-1:]
-    df.to_sql(name=f'dapi_all_account_value',
-              con=engine,
-              if_exists='append',
-              index=True)
+    _write_ledger_rows(engine, 'dapi_all_account_value', df)
 
 
 def cta_excute_init(*args):
@@ -805,8 +800,9 @@ def alpha_takeprofit_and_stoploss(*args):
                         send_wechat(
                             f'{strategy} {direction}{symbol}止盈并拉入黑名单失败，请排查')
 
-        df = df.append(
-            pd.DataFrame(profit_list, columns=['symbol', 'max_profit_ratio']))
+        df = _concat_ledger_frame(
+            df, pd.DataFrame(profit_list,
+                             columns=['symbol', 'max_profit_ratio']))
         df = df[df['max_profit_ratio'] > 0]
         df.sort_values('max_profit_ratio', ascending=False, inplace=True)
         df.drop_duplicates(subset='symbol', keep='first', inplace=True)
@@ -954,7 +950,8 @@ def cta_usdt_takeprofit_and_stoploss(*args):
 
             log_print(f'策略{cta_key}止盈止损监测完成')
 
-        df = df.append(
+        df = _concat_ledger_frame(
+            df,
             pd.DataFrame(profit_list,
                          columns=['symbol', 'cta_key', 'max_profit_ratio']))
         df = df[df['max_profit_ratio'] > 0]
@@ -989,22 +986,18 @@ def scheduler_deribit_account_balance(*args):
         row['candle_begin_time'] = datetime.now().replace(second=0,
                                                           microsecond=0)
 
-        sql = f'select * from deribit_{strategy}_value'
         try:
-            df = pd.read_sql(sql, con=engine, index_col='index')
+            df = _read_ledger_table(engine, f'deribit_{strategy}_value')
         except:
             df = pd.DataFrame(columns=[
                 'candle_begin_time', 'equity_usd', 'BTC', 'BTC_usd', 'ETH',
                 'ETH_usd', 'SOL', 'SOL_usd', 'USDC', 'USDC_usd'
             ])
 
-        df = df.append(row, ignore_index=True)
+        df = _append_ledger_row(df, row)
         df.reset_index(inplace=True, drop=True)
         df = df[-1:]
-        df.to_sql(name=f'deribit_{strategy}_value',
-                  con=engine,
-                  if_exists='append',
-                  index=True)
+        _write_ledger_rows(engine, f'deribit_{strategy}_value', df)
 
 
 def cta_usd_excute_init(*args, **kwargs):
@@ -1538,7 +1531,8 @@ def cta_usd_takeprofit_and_stoploss(*args):
 
             log_print(f'策略{cta_key}止盈止损监测完成')
 
-        df = df.append(
+        df = _concat_ledger_frame(
+            df,
             pd.DataFrame(profit_list,
                          columns=['symbol', 'cta_key', 'max_profit_ratio']))
         df = df[df['max_profit_ratio'] > 0]

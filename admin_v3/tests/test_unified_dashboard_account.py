@@ -4,11 +4,14 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
+import ccxt
+
 from functions import (get_account_balance, get_account_margin,
                        get_account_openorders, get_account_positions_list,
                        get_account_today_orders,
                        get_account_management_balance, get_all_account_balance,
                        get_all_account_positions_list, get_dapi_account_balance,
+                       get_dapi_account_today_orders,
                        calculate_account_profit_ratio)
 
 
@@ -57,6 +60,19 @@ class UnifiedDashboardExchange:
     def papiGetCmPositionRisk(self, params=None):
         return []
 
+    def papiGetCmUserTrades(self, params=None):
+        return [{
+            'symbol': params['symbol'],
+            'realizedPnl': '0.1',
+            'side': 'SELL',
+            'price': '3000',
+            'qty': '1',
+            'baseQty': '0.01',
+            'commission': '0.0001',
+            'commissionAsset': 'ETH',
+            'time': '1710000000000',
+        }]
+
     def dapiPublicGetTicker24hr(self):
         return [{'symbol': 'ETHUSD_PERP', 'lastPrice': '3000'}]
 
@@ -85,6 +101,11 @@ class UnifiedCrossMarginEthExchange(UnifiedDashboardExchange):
             'umWalletBalance': '0',
             'umUnrealizedPNL': '0',
         }]
+
+
+class DapiAuthFailureExchange:
+    def dapiPrivateGetUserTrades(self, params=None):
+        raise ccxt.AuthenticationError('Invalid API-key, IP, or permissions')
 
 
 class UnifiedDashboardAccountTest(unittest.TestCase):
@@ -141,6 +162,21 @@ class UnifiedDashboardAccountTest(unittest.TestCase):
         self.assertEqual(balance['status'], 0)
         self.assertEqual(balance['data']['items'][0]['asset'], 'ETH')
         self.assertEqual(balance['data']['items'][0]['margin_balance'], 0.04)
+
+    def test_unified_dapi_today_orders_use_papi_adapter(self):
+        orders = get_dapi_account_today_orders(self.exchange, 'ETHUSD_PERP',
+                                               'unified')
+
+        self.assertEqual(orders['status'], 0)
+        self.assertEqual(orders['data']['items'][0]['symbol'], 'ETHUSD_PERP')
+
+    def test_dapi_today_orders_returns_empty_data_when_exchange_auth_fails(self):
+        orders = get_dapi_account_today_orders(DapiAuthFailureExchange(),
+                                               'BTCUSD_PERP')
+
+        self.assertEqual(orders['status'], 0)
+        self.assertEqual(orders['data']['items'], [])
+        self.assertIn('获取币本位当日成交失败', orders['msg'])
 
     def test_account_management_balance_accepts_unified_accounts(self):
         binance_list = [{

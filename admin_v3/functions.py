@@ -34,6 +34,24 @@ simplefilter(action='ignore', category=FutureWarning)
 eps = 1e-8
 
 
+def read_sql_compatible(engine, sql, index_col=None):
+    raw_connection = engine.raw_connection()
+    try:
+        return pd.read_sql(sql, con=raw_connection, index_col=index_col)
+    finally:
+        raw_connection.close()
+
+
+def to_sql_compatible(df, engine, **kwargs):
+    raw_connection = engine.raw_connection()
+    try:
+        result = df.to_sql(con=raw_connection, **kwargs)
+        raw_connection.commit()
+        return result
+    finally:
+        raw_connection.close()
+
+
 def calculate_account_profit_ratio(current_equity, principal):
     current_equity = float(current_equity or 0)
     principal = float(principal or 0)
@@ -2884,7 +2902,9 @@ def get_account_today_orders(exchange, account_type=ACCOUNT_TYPE_STANDARD):
 
 
 # 获取当日成交订单
-def get_dapi_account_today_orders(exchange, symbol):
+def get_dapi_account_today_orders(exchange,
+                                  symbol,
+                                  account_type=ACCOUNT_TYPE_STANDARD):
     if exchange is None or symbol == '':
         return {'status': 0, 'msg': '', 'data': {'items': []}}
     now = datetime.now()
@@ -2892,7 +2912,18 @@ def get_dapi_account_today_orders(exchange, symbol):
     start_time_unix = int(start.timestamp() * 1000)
     params = {'startTime': start_time_unix, 'symbol': symbol}
 
-    orders = exchange.dapiPrivateGetUserTrades(params)
+    account = make_binance_account_adapter(exchange, account_type)
+    try:
+        orders = account.get_user_trades('cm', params)
+    except ccxt.BaseError as e:
+        log_print(f'获取币本位当日成交失败: {e}')
+        return {
+            'status': 0,
+            'msg': '获取币本位当日成交失败',
+            'data': {
+                'items': []
+            }
+        }
     if len(orders) == 0:
         return {'status': 0, 'msg': '', 'data': {'items': []}}
 
@@ -3236,7 +3267,7 @@ def get_account_management_balance_echarts(exchange):
     engine = create_engine(sql_uri)
     sql = f'select * from total_binance_account_value'
     try:
-        df = pd.read_sql(sql, con=engine, index_col='index')
+        df = read_sql_compatible(engine, sql, index_col='index')
     except:
         return {'status': 0, 'msg': '', 'data': {}}
 
@@ -3364,7 +3395,7 @@ def get_account_balance_echarts(strategy):
     engine = create_engine(sql_uri)
     sql = f'select * from {strategy}_value'
     try:
-        df = pd.read_sql(sql, con=engine, index_col='index')
+        df = read_sql_compatible(engine, sql, index_col='index')
     except:
         return {'status': 0, 'msg': '', 'data': {}}
 
@@ -3492,7 +3523,7 @@ def get_dapi_account_balance_echarts(strategy):
     engine = create_engine(sql_uri)
     sql = f'select * from dapi_{strategy}_value'
     try:
-        df = pd.read_sql(sql, con=engine, index_col='index')
+        df = read_sql_compatible(engine, sql, index_col='index')
     except:
         return {'status': 0, 'msg': '', 'data': {}}
 
@@ -3620,7 +3651,7 @@ def get_deribit_account_balance_echarts(strategy):
     engine = create_engine(sql_uri)
     sql = f'select * from deribit_{strategy}_value'
     try:
-        df = pd.read_sql(sql, con=engine, index_col='index')
+        df = read_sql_compatible(engine, sql, index_col='index')
     except:
         return {'status': 0, 'msg': '', 'data': {}}
 
@@ -3970,7 +4001,7 @@ def get_deribit_crypto_coin_echarts(strategy):
     engine = create_engine(sql_uri)
     sql = f'select * from deribit_{strategy}_value'
     try:
-        df = pd.read_sql(sql, con=engine, index_col='index')
+        df = read_sql_compatible(engine, sql, index_col='index')
     except:
         return {'status': 0, 'msg': '', 'data': {}}
 

@@ -667,8 +667,9 @@ def dapi_account_today_orders():
     strategy = request.args.get('strategy')
     symbol = request.args.get('symbol')
     exchange = get_exchange(binance_list, strategy)
+    account_type = get_exchange_account_type(binance_list, strategy)
     res = make_response(
-        jsonify(get_dapi_account_today_orders(exchange, symbol)))
+        jsonify(get_dapi_account_today_orders(exchange, symbol, account_type)))
     res = decorate_res(res)
     return res
 
