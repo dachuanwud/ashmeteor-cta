@@ -877,6 +877,379 @@ def get_symbol_spot_price(exchange, symbol):
                     return symbol_price
 
 
+def decimal_or_zero(value):
+    try:
+        if value is None or value == '':
+            return Decimal('0')
+        return Decimal(str(value))
+    except Exception:
+        return Decimal('0')
+
+
+def decimal_to_float(value, digits=4):
+    return float(round(decimal_or_zero(value), digits))
+
+
+def asset_amount_to_usd(exchange, asset, amount):
+    amount = decimal_or_zero(amount)
+    asset = (asset or '').upper()
+    if amount == 0:
+        return Decimal('0')
+    if asset in ('USD', 'USDT', 'BUSD', 'USDC', 'FDUSD', 'TUSD'):
+        return amount
+    try:
+        price = get_symbol_spot_price(exchange, f'{asset}USDT')
+        return amount * decimal_or_zero(price.get('price'))
+    except Exception:
+        return Decimal('0')
+
+
+def build_account_v2_empty_overview(strategy, account_type):
+    return {
+        'strategy': strategy or '',
+        'account_type': account_type or ACCOUNT_TYPE_STANDARD,
+        'account_status': 'UNKNOWN',
+        'total_equity_usd': 0.0,
+        'available_usd': 0.0,
+        'unrealized_profit_usd': 0.0,
+        'long_exposure_usd': 0.0,
+        'short_exposure_usd': 0.0,
+        'net_exposure_usd': 0.0,
+        'gross_exposure_usd': 0.0,
+        'leverage_ratio': 0.0,
+        'wallets': [],
+        'positions': [],
+        'strategy_exposures': [],
+    }
+
+
+def build_account_v2_wallet(wallet_type,
+                            wallet_label,
+                            equity_usd=0,
+                            wallet_balance_usd=0,
+                            available_usd=0,
+                            unrealized_profit_usd=0,
+                            data_source='',
+                            status='NORMAL',
+                            assets=None):
+    equity_usd = decimal_or_zero(equity_usd)
+    wallet_balance_usd = decimal_or_zero(wallet_balance_usd)
+    available_usd = decimal_or_zero(available_usd)
+    unrealized_profit_usd = decimal_or_zero(unrealized_profit_usd)
+    return {
+        'wallet_type': wallet_type,
+        'wallet_label': wallet_label,
+        'status': status,
+        'equity_usd': decimal_to_float(equity_usd, 4),
+        'wallet_balance_usd': decimal_to_float(wallet_balance_usd, 4),
+        'available_usd': decimal_to_float(available_usd, 4),
+        'unrealized_profit_usd': decimal_to_float(unrealized_profit_usd, 4),
+        'asset_count': len(assets or []),
+        'assets_detail': json.dumps(assets or [], ensure_ascii=False),
+        'data_source': data_source,
+    }
+
+
+def build_account_v2_position(exchange, raw_position, market_type):
+    amount = decimal_or_zero(raw_position.get('positionAmt'))
+    if amount == 0:
+        return None
+    symbol = raw_position.get('symbol', '')
+    notional = decimal_or_zero(raw_position.get('notional')
+                               or raw_position.get('notionalValue'))
+    if notional == 0:
+        mark_price = decimal_or_zero(raw_position.get('markPrice')
+                                     or raw_position.get('lastPrice'))
+        notional = amount * mark_price
+    unrealized = decimal_or_zero(raw_position.get('unRealizedProfit')
+                                 or raw_position.get('unrealizedProfit'))
+    side = 'SELL' if amount < 0 else 'BUY'
+    return {
+        'market_type': market_type,
+        'symbol': symbol,
+        'side': side,
+        'position_amount': decimal_to_float(amount, 8),
+        'entry_price': decimal_to_float(raw_position.get('entryPrice'), 8),
+        'mark_price': decimal_to_float(raw_position.get('markPrice')
+                                       or raw_position.get('lastPrice'), 8),
+        'notional_usd': decimal_to_float(notional, 4),
+        'unrealized_profit_usd': decimal_to_float(unrealized, 4),
+        'leverage': decimal_to_float(raw_position.get('leverage'), 4),
+    }
+
+
+def summarize_account_v2_exposure(positions):
+    long_exposure = Decimal('0')
+    short_exposure = Decimal('0')
+    unrealized = Decimal('0')
+    for pos in positions:
+        notional = decimal_or_zero(pos.get('notional_usd')
+                                   or pos.get('position_usd'))
+        unrealized += decimal_or_zero(pos.get('unrealized_profit_usd')
+                                      or pos.get('profit'))
+        if pos.get('side') == 'BUY':
+            long_exposure += abs(notional)
+        else:
+            short_exposure += abs(notional)
+    return long_exposure, short_exposure, unrealized
+
+
+def build_account_v2_unified_wallets(exchange, balance_assets):
+    wallet_specs = [('UM', 'U本位'), ('CM', '币本位'),
+                    ('MARGIN_OR_SPOT', '现货/杠杆')]
+    totals = {
+        key: {
+            'wallet': Decimal('0'),
+            'equity': Decimal('0'),
+            'available': Decimal('0'),
+            'pnl': Decimal('0'),
+            'assets': []
+        }
+        for key, _ in wallet_specs
+    }
+
+    for item in balance_assets:
+        asset = item.get('asset', '')
+        total_wallet = decimal_or_zero(item.get('totalWalletBalance'))
+        um_wallet = decimal_or_zero(item.get('umWalletBalance'))
+        um_pnl = decimal_or_zero(item.get('umUnrealizedPNL'))
+        cm_wallet = decimal_or_zero(item.get('cmWalletBalance'))
+        cm_pnl = decimal_or_zero(item.get('cmUnrealizedPNL'))
+        cross_free = decimal_or_zero(item.get('crossMarginFree'))
+        cross_locked = decimal_or_zero(item.get('crossMarginLocked'))
+        margin_wallet = cross_free + cross_locked
+        if margin_wallet == 0:
+            margin_wallet = total_wallet - um_wallet - cm_wallet
+        if margin_wallet < 0:
+            margin_wallet = Decimal('0')
+
+        asset_parts = {
+            'UM': (um_wallet, um_wallet + um_pnl, um_wallet, um_pnl),
+            'CM': (cm_wallet, cm_wallet + cm_pnl, cm_wallet, cm_pnl),
+            'MARGIN_OR_SPOT': (margin_wallet, margin_wallet,
+                               cross_free if cross_free != 0 else margin_wallet,
+                               Decimal('0')),
+        }
+        for wallet_type, (wallet_amount, equity_amount, available_amount,
+                          pnl_amount) in asset_parts.items():
+            if (wallet_amount == 0 and equity_amount == 0
+                    and available_amount == 0 and pnl_amount == 0):
+                continue
+            wallet_usd = asset_amount_to_usd(exchange, asset, wallet_amount)
+            equity_usd = asset_amount_to_usd(exchange, asset, equity_amount)
+            available_usd = asset_amount_to_usd(exchange, asset,
+                                                available_amount)
+            pnl_usd = asset_amount_to_usd(exchange, asset, pnl_amount)
+            totals[wallet_type]['wallet'] += wallet_usd
+            totals[wallet_type]['equity'] += equity_usd
+            totals[wallet_type]['available'] += available_usd
+            totals[wallet_type]['pnl'] += pnl_usd
+            totals[wallet_type]['assets'].append({
+                'asset': asset,
+                'wallet_amount': decimal_to_float(wallet_amount, 8),
+                'equity_amount': decimal_to_float(equity_amount, 8),
+                'available_amount': decimal_to_float(available_amount, 8),
+                'unrealized_pnl_amount': decimal_to_float(pnl_amount, 8),
+                'equity_usd': decimal_to_float(equity_usd, 4),
+            })
+
+    return [
+        build_account_v2_wallet(wallet_type,
+                                label,
+                                totals[wallet_type]['equity'],
+                                totals[wallet_type]['wallet'],
+                                totals[wallet_type]['available'],
+                                totals[wallet_type]['pnl'],
+                                'papiGetBalance',
+                                assets=totals[wallet_type]['assets'])
+        for wallet_type, label in wallet_specs
+    ]
+
+
+def get_account_v2_strategy_exposures(strategy):
+    if not has_app_context():
+        return []
+    try:
+        query = CtaUnifiedMarginRebalance.query.filter(
+            CtaUnifiedMarginRebalance.is_del == 0)
+        if strategy:
+            query = query.filter(CtaUnifiedMarginRebalance.strategy == strategy)
+        items = []
+        for row in query.order_by(CtaUnifiedMarginRebalance.asset).all():
+            item = row.to_dict()
+            item['exposure_type'] = '统一账户半套'
+            items.append(item)
+        return items
+    except Exception as e:
+        log_print(f'获取统一账户策略暴露失败: {e}')
+        return []
+
+
+def get_account_v2_overview(exchange,
+                            strategy,
+                            account_type=ACCOUNT_TYPE_STANDARD):
+    account_type = (ACCOUNT_TYPE_UNIFIED
+                    if account_type == ACCOUNT_TYPE_UNIFIED
+                    else ACCOUNT_TYPE_STANDARD)
+    data = build_account_v2_empty_overview(strategy, account_type)
+    if exchange is None:
+        return {'status': 0, 'msg': '', 'data': data}
+
+    account = make_binance_account_adapter(exchange, account_type)
+    if account.is_unified:
+        summary = account.get_account_summary()
+        balance_assets = account.get_balance_assets()
+        wallets = build_account_v2_unified_wallets(exchange, balance_assets)
+        raw_positions = []
+        for market_type, getter in (('UM', account.get_um_position_risk),
+                                    ('CM', account.get_cm_position_risk)):
+            try:
+                raw_positions.extend([(market_type, pos) for pos in getter()])
+            except Exception as e:
+                log_print(f'获取统一账户{market_type}持仓失败: {e}')
+        positions = []
+        for market_type, raw_position in raw_positions:
+            pos = build_account_v2_position(exchange, raw_position, market_type)
+            if pos:
+                positions.append(pos)
+        long_exposure, short_exposure, position_unrealized = (
+            summarize_account_v2_exposure(positions))
+        total_equity = decimal_or_zero(summary.get('accountEquity')
+                                       or summary.get('totalMarginBalance')
+                                       or summary.get('totalWalletBalance'))
+        available = decimal_or_zero(summary.get('totalAvailableBalance'))
+        data.update({
+            'account_status':
+                summary.get('accountStatus', 'UNKNOWN'),
+            'total_equity_usd':
+                decimal_to_float(total_equity, 4),
+            'available_usd':
+                decimal_to_float(available, 4),
+            'unrealized_profit_usd':
+                decimal_to_float(position_unrealized, 4),
+            'long_exposure_usd':
+                decimal_to_float(long_exposure, 4),
+            'short_exposure_usd':
+                decimal_to_float(short_exposure, 4),
+            'net_exposure_usd':
+                decimal_to_float(long_exposure - short_exposure, 4),
+            'gross_exposure_usd':
+                decimal_to_float(long_exposure + short_exposure, 4),
+            'leverage_ratio':
+                decimal_to_float(
+                    (long_exposure + short_exposure) / total_equity
+                    if total_equity > 0 else 0, 4),
+            'wallets':
+                wallets,
+            'positions':
+                positions,
+            'strategy_exposures':
+                get_account_v2_strategy_exposures(strategy),
+        })
+        return {'status': 0, 'msg': '', 'data': data}
+
+    um_equity = decimal_or_zero(get_fapi_account_balance(exchange, account_type))
+    cm_equity = decimal_or_zero(
+        get_dapi_total_account_balance(exchange, account_type))
+    spot_equity = decimal_or_zero(get_spot_account_balance(exchange))
+    fund_equity = decimal_or_zero(get_fund_account_balance(exchange))
+    saving_equity = decimal_or_zero(get_saving_account_balance(exchange))
+    wallets = [
+        build_account_v2_wallet('UM', 'U本位', um_equity, um_equity,
+                                um_equity, data_source='fapiPrivateV2_get_account'),
+        build_account_v2_wallet('CM', '币本位', cm_equity, cm_equity,
+                                cm_equity, data_source='dapiPrivate_get_account'),
+        build_account_v2_wallet('MARGIN_OR_SPOT', '现货', spot_equity,
+                                spot_equity, spot_equity,
+                                data_source='private_get_account'),
+        build_account_v2_wallet('FUNDING', '资金', fund_equity, fund_equity,
+                                fund_equity,
+                                data_source='sapi_post_asset_get_funding_asset'),
+        build_account_v2_wallet('SAVING', '理财', saving_equity, saving_equity,
+                                saving_equity, data_source='sapi_lending'),
+    ]
+    positions = []
+    try:
+        positions.extend([
+            dict(item, market_type='UM')
+            for item in get_account_positions_list(exchange,
+                                                   account_type)['data']['items']
+        ])
+    except Exception as e:
+        log_print(f'获取普通账户U本位持仓失败: {e}')
+    try:
+        positions.extend([
+            dict(item, market_type='CM')
+            for item in get_dapi_account_positions_list(
+                exchange, account_type)['data']['items']
+        ])
+    except Exception as e:
+        log_print(f'获取普通账户币本位持仓失败: {e}')
+
+    long_exposure, short_exposure, position_unrealized = (
+        summarize_account_v2_exposure(positions))
+    total_equity = um_equity + cm_equity + spot_equity + fund_equity + saving_equity
+    data.update({
+        'account_status':
+            'NORMAL',
+        'total_equity_usd':
+            decimal_to_float(total_equity, 4),
+        'available_usd':
+            decimal_to_float(total_equity, 4),
+        'unrealized_profit_usd':
+            decimal_to_float(position_unrealized, 4),
+        'long_exposure_usd':
+            decimal_to_float(long_exposure, 4),
+        'short_exposure_usd':
+            decimal_to_float(short_exposure, 4),
+        'net_exposure_usd':
+            decimal_to_float(long_exposure - short_exposure, 4),
+        'gross_exposure_usd':
+            decimal_to_float(long_exposure + short_exposure, 4),
+        'leverage_ratio':
+            decimal_to_float((long_exposure + short_exposure) / total_equity
+                             if total_equity > 0 else 0, 4),
+        'wallets':
+            wallets,
+        'positions':
+            positions,
+        'strategy_exposures':
+            get_account_v2_strategy_exposures(strategy),
+    })
+    return {'status': 0, 'msg': '', 'data': data}
+
+
+def get_account_v2_overview_section(overview, section):
+    if overview.get('status') != 0:
+        return overview
+    data = overview.get('data', {})
+    if section == 'summary':
+        items = [{
+            'strategy': data.get('strategy', ''),
+            'account_type': data.get('account_type', ''),
+            'account_status': data.get('account_status', ''),
+            'total_equity_usd': data.get('total_equity_usd', 0),
+            'available_usd': data.get('available_usd', 0),
+            'unrealized_profit_usd': data.get('unrealized_profit_usd', 0),
+            'long_exposure_usd': data.get('long_exposure_usd', 0),
+            'short_exposure_usd': data.get('short_exposure_usd', 0),
+            'net_exposure_usd': data.get('net_exposure_usd', 0),
+            'gross_exposure_usd': data.get('gross_exposure_usd', 0),
+            'leverage_ratio': data.get('leverage_ratio', 0),
+            'wallet_count': len(data.get('wallets', [])),
+        }]
+    else:
+        items = data.get(section, [])
+    return {
+        'status': 0,
+        'msg': '',
+        'data': {
+            'items': items,
+            'total': len(items)
+        }
+    }
+
+
 def get_account_management_balance(binance_list):
     total_wallet_balance = 0
     total_fapi_wallet_balance = 0

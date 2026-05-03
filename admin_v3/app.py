@@ -122,6 +122,20 @@ def account_list():
     return res
 
 
+@app.route('/account/v2/overview', methods=['GET'])
+def account_v2_overview():
+    strategy = request.args.get('strategy')
+    section = request.args.get('section')
+    exchange = get_exchange(binance_list, strategy)
+    account_type = get_exchange_account_type(binance_list, strategy)
+    overview = get_account_v2_overview(exchange, strategy, account_type)
+    if section:
+        overview = get_account_v2_overview_section(overview, section)
+    res = make_response(jsonify(overview))
+    res = decorate_res(res)
+    return res
+
+
 @app.route('/deribit/account/list', methods=['GET'])
 def deribit_account_list():
     res = make_response(jsonify(get_account_list(deribit_list)))

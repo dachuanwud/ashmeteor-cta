@@ -12,7 +12,9 @@ from functions import (get_account_balance, get_account_margin,
                        get_account_management_balance, get_all_account_balance,
                        get_all_account_positions_list, get_dapi_account_balance,
                        get_dapi_account_today_orders,
-                       calculate_account_profit_ratio)
+                       calculate_account_profit_ratio,
+                       get_account_v2_overview,
+                       get_account_v2_overview_section)
 
 
 class UnifiedDashboardExchange:
@@ -85,6 +87,60 @@ class UnifiedDashboardExchange:
                 'quoteAsset': 'USD',
             }]
         }
+
+    def public_get_ticker_price(self, params=None):
+        return {'symbol': params['symbol'], 'price': '3000'}
+
+
+class StandardDashboardExchange:
+    def fapiPrivateV2_get_account(self):
+        return {
+            'totalWalletBalance': '700',
+            'totalUnrealizedProfit': '10',
+            'totalMarginBalance': '710',
+            'availableBalance': '650',
+            'assets': [{
+                'asset': 'USDT',
+                'walletBalance': '700',
+                'unrealizedProfit': '10',
+                'marginBalance': '710',
+                'maxWithdrawAmount': '650',
+            }],
+            'positions': [{
+                'symbol': 'ETHUSDT',
+                'positionAmt': '0.2',
+                'entryPrice': '3000',
+                'notional': '600',
+                'unRealizedProfit': '10',
+                'positionInitialMargin': '60',
+            }],
+        }
+
+    def dapiPrivate_get_account(self):
+        return {
+            'assets': [{
+                'asset': 'ETH',
+                'walletBalance': '0.1',
+                'marginBalance': '0.1',
+                'unrealizedProfit': '0',
+            }],
+            'positions': [],
+        }
+
+    def private_get_account(self):
+        return {
+            'balances': [{
+                'asset': 'USDT',
+                'free': '50',
+                'locked': '0',
+            }]
+        }
+
+    def sapi_post_asset_get_funding_asset(self):
+        return []
+
+    def dapiPublicGetTicker24hr(self, params=None):
+        return [{'symbol': 'ETHUSD_PERP', 'lastPrice': '3000'}]
 
     def public_get_ticker_price(self, params=None):
         return {'symbol': params['symbol'], 'price': '3000'}
@@ -195,6 +251,47 @@ class UnifiedDashboardAccountTest(unittest.TestCase):
         self.assertEqual(calculate_account_profit_ratio(1100, 1000), 0.1)
         self.assertEqual(calculate_account_profit_ratio(995, 1000), -0.005)
         self.assertEqual(calculate_account_profit_ratio(1100, 0), 0)
+
+    def test_unified_account_v2_overview_exposes_three_wallets(self):
+        overview = get_account_v2_overview(self.exchange, 'admin_v3_unified',
+                                           'unified')
+
+        self.assertEqual(overview['status'], 0)
+        data = overview['data']
+        self.assertEqual(data['account_type'], 'unified')
+        wallet_types = [wallet['wallet_type'] for wallet in data['wallets']]
+        self.assertEqual(wallet_types, ['UM', 'CM', 'MARGIN_OR_SPOT'])
+        self.assertEqual(data['wallets'][0]['wallet_label'], 'U本位')
+        self.assertEqual(data['wallets'][1]['wallet_label'], '币本位')
+        self.assertEqual(data['wallets'][2]['wallet_label'], '现货/杠杆')
+        self.assertEqual(data['positions'][0]['market_type'], 'UM')
+
+    def test_standard_account_v2_overview_keeps_legacy_wallet_shape(self):
+        overview = get_account_v2_overview(StandardDashboardExchange(),
+                                           'standard_strategy', 'standard')
+
+        self.assertEqual(overview['status'], 0)
+        data = overview['data']
+        self.assertEqual(data['account_type'], 'standard')
+        wallet_types = [wallet['wallet_type'] for wallet in data['wallets']]
+        self.assertEqual(wallet_types,
+                         ['UM', 'CM', 'MARGIN_OR_SPOT', 'FUNDING', 'SAVING'])
+        self.assertEqual(data['wallets'][2]['wallet_label'], '现货')
+        self.assertEqual(data['wallets'][0]['equity_usd'], 710.0)
+        self.assertEqual(data['wallets'][1]['equity_usd'], 300.0)
+        self.assertEqual(data['wallets'][2]['equity_usd'], 50.0)
+        self.assertEqual(data['long_exposure_usd'], 600.0)
+
+    def test_account_v2_overview_section_formats_crud_rows(self):
+        overview = get_account_v2_overview(self.exchange, 'admin_v3_unified',
+                                           'unified')
+        wallets = get_account_v2_overview_section(overview, 'wallets')
+        summary = get_account_v2_overview_section(overview, 'summary')
+
+        self.assertEqual(wallets['data']['total'], 3)
+        self.assertEqual(wallets['data']['items'][0]['wallet_type'], 'UM')
+        self.assertEqual(summary['data']['items'][0]['strategy'],
+                         'admin_v3_unified')
 
 
 if __name__ == '__main__':

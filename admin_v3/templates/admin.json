@@ -7,6 +7,338 @@
             "id": "u:aec2ce52703d",
             "tabs": [
               {
+                "title": "账户拓扑",
+                "body": [
+                  {
+                    "type": "select",
+                    "id": "u:account_topology_strategy",
+                    "label": "账户选择",
+                    "name": "strategy",
+                    "selectFirst": true,
+                    "mode": "inline",
+                    "source": "/account/list",
+                    "size": "sm",
+                    "searchable": true,
+                    "multiple": false
+                  },
+                  {
+                    "type": "button",
+                    "id": "u:account_topology_reload",
+                    "label": "刷新账户拓扑",
+                    "level": "primary",
+                    "size": "sm",
+                    "onEvent": {
+                      "click": {
+                        "actions": [
+                          {
+                            "componentId": "u:account_topology_summary",
+                            "args": {},
+                            "actionType": "reload"
+                          },
+                          {
+                            "componentId": "u:account_topology_wallets",
+                            "args": {},
+                            "actionType": "reload"
+                          },
+                          {
+                            "componentId": "u:account_topology_positions",
+                            "args": {},
+                            "actionType": "reload"
+                          },
+                          {
+                            "componentId": "u:account_topology_exposures",
+                            "args": {},
+                            "actionType": "reload"
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  {
+                    "type": "crud",
+                    "id": "u:account_topology_summary",
+                    "title": "账户总览",
+                    "syncLocation": false,
+                    "api": {
+                      "method": "get",
+                      "url": "/account/v2/overview?strategy=${strategy}&section=summary"
+                    },
+                    "mode": "table",
+                    "columns": [
+                      {
+                        "name": "strategy",
+                        "label": "账户",
+                        "type": "text"
+                      },
+                      {
+                        "name": "account_type",
+                        "label": "账户类型",
+                        "type": "text"
+                      },
+                      {
+                        "name": "account_status",
+                        "label": "账户状态",
+                        "type": "text"
+                      },
+                      {
+                        "name": "total_equity_usd",
+                        "label": "总净值(USD)",
+                        "type": "text"
+                      },
+                      {
+                        "name": "available_usd",
+                        "label": "可用(USD)",
+                        "type": "text"
+                      },
+                      {
+                        "name": "unrealized_profit_usd",
+                        "label": "未实现盈亏(USD)",
+                        "type": "text"
+                      },
+                      {
+                        "name": "long_exposure_usd",
+                        "label": "多头暴露(USD)",
+                        "type": "text"
+                      },
+                      {
+                        "name": "short_exposure_usd",
+                        "label": "空头暴露(USD)",
+                        "type": "text"
+                      },
+                      {
+                        "name": "net_exposure_usd",
+                        "label": "净暴露(USD)",
+                        "type": "text"
+                      },
+                      {
+                        "name": "leverage_ratio",
+                        "label": "总杠杆",
+                        "type": "text"
+                      }
+                    ],
+                    "bulkActions": [],
+                    "itemActions": [],
+                    "perPage": 10,
+                    "perPageAvailable": [
+                      10
+                    ]
+                  },
+                  {
+                    "type": "divider",
+                    "id": "u:account_topology_divider_wallets"
+                  },
+                  {
+                    "type": "crud",
+                    "id": "u:account_topology_wallets",
+                    "title": "钱包拓扑",
+                    "syncLocation": false,
+                    "api": {
+                      "method": "get",
+                      "url": "/account/v2/overview?strategy=${strategy}&section=wallets"
+                    },
+                    "mode": "table",
+                    "columns": [
+                      {
+                        "name": "wallet_label",
+                        "label": "钱包",
+                        "type": "text"
+                      },
+                      {
+                        "name": "wallet_type",
+                        "label": "内部类型",
+                        "type": "text"
+                      },
+                      {
+                        "name": "status",
+                        "label": "状态",
+                        "type": "text"
+                      },
+                      {
+                        "name": "equity_usd",
+                        "label": "权益(USD)",
+                        "type": "text"
+                      },
+                      {
+                        "name": "wallet_balance_usd",
+                        "label": "钱包余额(USD)",
+                        "type": "text"
+                      },
+                      {
+                        "name": "available_usd",
+                        "label": "可用(USD)",
+                        "type": "text"
+                      },
+                      {
+                        "name": "unrealized_profit_usd",
+                        "label": "未实现盈亏(USD)",
+                        "type": "text"
+                      },
+                      {
+                        "name": "asset_count",
+                        "label": "资产数",
+                        "type": "text"
+                      },
+                      {
+                        "name": "data_source",
+                        "label": "数据源",
+                        "type": "text"
+                      }
+                    ],
+                    "bulkActions": [],
+                    "itemActions": [],
+                    "perPage": 10,
+                    "perPageAvailable": [
+                      10
+                    ],
+                    "interval": 60000,
+                    "silentPolling": true
+                  },
+                  {
+                    "type": "divider",
+                    "id": "u:account_topology_divider_positions"
+                  },
+                  {
+                    "type": "crud",
+                    "id": "u:account_topology_positions",
+                    "title": "持仓暴露",
+                    "syncLocation": false,
+                    "api": {
+                      "method": "get",
+                      "url": "/account/v2/overview?strategy=${strategy}&section=positions"
+                    },
+                    "mode": "table",
+                    "placeholder": "-",
+                    "columns": [
+                      {
+                        "name": "market_type",
+                        "label": "市场",
+                        "type": "text"
+                      },
+                      {
+                        "name": "symbol",
+                        "label": "标的",
+                        "type": "text"
+                      },
+                      {
+                        "name": "side",
+                        "label": "方向",
+                        "type": "text"
+                      },
+                      {
+                        "name": "position_amount",
+                        "label": "持仓数量",
+                        "type": "text"
+                      },
+                      {
+                        "name": "entry_price",
+                        "label": "成本价",
+                        "type": "text"
+                      },
+                      {
+                        "name": "notional_usd",
+                        "label": "名义价值(USD)",
+                        "type": "text"
+                      },
+                      {
+                        "name": "unrealized_profit_usd",
+                        "label": "未实现盈亏(USD)",
+                        "type": "text"
+                      },
+                      {
+                        "name": "leverage",
+                        "label": "杠杆",
+                        "type": "text"
+                      }
+                    ],
+                    "bulkActions": [],
+                    "itemActions": [],
+                    "perPage": 100,
+                    "perPageAvailable": [
+                      10
+                    ],
+                    "interval": 60000,
+                    "silentPolling": true
+                  },
+                  {
+                    "type": "divider",
+                    "id": "u:account_topology_divider_exposures"
+                  },
+                  {
+                    "type": "crud",
+                    "id": "u:account_topology_exposures",
+                    "title": "半套与策略暴露",
+                    "syncLocation": false,
+                    "api": {
+                      "method": "get",
+                      "url": "/account/v2/overview?strategy=${strategy}&section=strategy_exposures"
+                    },
+                    "mode": "table",
+                    "placeholder": "-",
+                    "columns": [
+                      {
+                        "name": "exposure_type",
+                        "label": "类型",
+                        "type": "text"
+                      },
+                      {
+                        "name": "strategy",
+                        "label": "账户",
+                        "type": "text"
+                      },
+                      {
+                        "name": "asset",
+                        "label": "资产",
+                        "type": "text"
+                      },
+                      {
+                        "name": "hedge_symbol",
+                        "label": "对冲标的",
+                        "type": "text"
+                      },
+                      {
+                        "name": "asset_base_qty",
+                        "label": "底仓数量",
+                        "type": "text"
+                      },
+                      {
+                        "name": "target_base_qty",
+                        "label": "目标对冲",
+                        "type": "text"
+                      },
+                      {
+                        "name": "current_um_position",
+                        "label": "当前U本位仓位",
+                        "type": "text"
+                      },
+                      {
+                        "name": "position_gap",
+                        "label": "仓位差额",
+                        "type": "text"
+                      },
+                      {
+                        "name": "hedge_ratio",
+                        "label": "半套比例",
+                        "type": "text"
+                      },
+                      {
+                        "name": "last_msg",
+                        "label": "最近结果",
+                        "type": "text"
+                      }
+                    ],
+                    "bulkActions": [],
+                    "itemActions": [],
+                    "perPage": 100,
+                    "perPageAvailable": [
+                      10
+                    ],
+                    "interval": 60000,
+                    "silentPolling": true
+                  }
+                ],
+                "id": "u:account_topology_tab"
+              },
+              {
                 "title": "U本位账户",
                 "body": [
                   {
