@@ -2,7 +2,9 @@ from datetime import datetime, timedelta
 import ccxt
 from decimal import Decimal, ROUND_DOWN
 from multiprocessing import Pool
-from sqlalchemy import create_engine
+from sqlalchemy import (BigInteger, Column, DateTime as SqlDateTime,
+                        Float as SqlFloat, MetaData, Table, Text,
+                        create_engine, inspect, text)
 from flask import has_app_context
 from config import debug, amis_edit_origin, local_origin, proxy, sql_uri, wechat_hook_key, auto_add_re
 from factors import *
@@ -35,21 +37,57 @@ eps = 1e-8
 
 
 def read_sql_compatible(engine, sql, index_col=None):
-    raw_connection = engine.raw_connection()
-    try:
-        return pd.read_sql(sql, con=raw_connection, index_col=index_col)
-    finally:
-        raw_connection.close()
+    with engine.connect() as connection:
+        result = connection.execute(text(sql))
+        rows = result.fetchall()
+        df = pd.DataFrame(rows, columns=result.keys())
+    if index_col and index_col in df.columns:
+        df.set_index(index_col, inplace=True)
+    return df
 
 
 def to_sql_compatible(df, engine, **kwargs):
-    raw_connection = engine.raw_connection()
-    try:
-        result = df.to_sql(con=raw_connection, **kwargs)
-        raw_connection.commit()
-        return result
-    finally:
-        raw_connection.close()
+    table_name = kwargs['name']
+    include_index = kwargs.get('index', True)
+    if_exists = kwargs.get('if_exists', 'fail')
+    if if_exists not in ('append', 'fail'):
+        raise ValueError(f'unsupported if_exists: {if_exists}')
+
+    insert_df = df.copy()
+    if include_index:
+        insert_df.insert(0, 'index', insert_df.index)
+    if insert_df.empty:
+        return 0
+
+    metadata = MetaData()
+    inspector = inspect(engine)
+    if not inspector.has_table(table_name):
+        columns = [
+            Column(column, _sqlalchemy_column_type(insert_df[column]))
+            for column in insert_df.columns
+        ]
+        Table(table_name, metadata, *columns)
+        metadata.create_all(engine)
+
+    table = Table(table_name, metadata, autoload_with=engine)
+    records = insert_df.where(pd.notnull(insert_df), None).to_dict('records')
+    with engine.begin() as connection:
+        connection.execute(table.insert(), records)
+    return len(records)
+
+
+def _sqlalchemy_column_type(series):
+    if pd.api.types.is_datetime64_any_dtype(series):
+        return SqlDateTime()
+    if pd.api.types.is_numeric_dtype(series):
+        if series.name == 'index':
+            return BigInteger()
+        return SqlFloat()
+
+    sample = series.dropna()
+    if not sample.empty and isinstance(sample.iloc[0], datetime):
+        return SqlDateTime()
+    return Text()
 
 
 def calculate_account_profit_ratio(current_equity, principal):

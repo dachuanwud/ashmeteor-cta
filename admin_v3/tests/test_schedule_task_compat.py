@@ -1,6 +1,7 @@
 import os
 import sys
 import unittest
+from unittest.mock import patch
 
 import pandas as pd
 from sqlalchemy import create_engine
@@ -8,7 +9,8 @@ from sqlalchemy import create_engine
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from schedule_task import (_append_ledger_row, _concat_ledger_frame,
-                           _get_um_margin_balance, _read_ledger_table)
+                           _get_um_margin_balance, _read_ledger_table,
+                           _write_ledger_rows)
 
 
 class UnifiedAccountSummaryExchange:
@@ -58,6 +60,21 @@ class ScheduleTaskCompatTest(unittest.TestCase):
         df = _read_ledger_table(engine, 'account_value')
 
         self.assertEqual(int(df.iloc[0]['net_value']), 7)
+
+    def test_write_ledger_rows_uses_sqlalchemy_insert_not_pandas_to_sql(self):
+        engine = create_engine('sqlite:///:memory:')
+        df = pd.DataFrame([{
+            'candle_begin_time': pd.Timestamp('2026-05-03 11:00:00'),
+            'net_value': 9.5,
+        }])
+
+        with patch.object(pd.DataFrame, 'to_sql',
+                          side_effect=AssertionError('do not use pandas to_sql')):
+            inserted = _write_ledger_rows(engine, 'account_value', df)
+        stored = _read_ledger_table(engine, 'account_value')
+
+        self.assertEqual(inserted, 1)
+        self.assertEqual(float(stored.iloc[0]['net_value']), 9.5)
 
     def test_unified_um_margin_balance_uses_account_adapter(self):
         balance = _get_um_margin_balance(UnifiedAccountSummaryExchange(),
