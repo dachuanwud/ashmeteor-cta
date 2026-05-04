@@ -284,6 +284,7 @@ class HalfsetReconcileTest(unittest.TestCase):
         data = res['data']
         self.assertEqual(data['cta_target_qty'], Decimal('0.218631150'))
         self.assertEqual(data['total_target_qty'], Decimal('0E-9'))
+        self.assertEqual(data['last_signal'], 1)
         self.assertEqual(data['order']['side'], 'BUY')
         self.assertEqual(data['order']['quantity'], '0.218000')
         self.assertEqual(exchange.orders, [])

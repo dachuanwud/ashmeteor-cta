@@ -7719,6 +7719,7 @@ def reconcile_unified_halfset_position(exchange,
         'strategy': strategy,
         'asset': asset,
         'hedge_symbol': hedge_symbol,
+        'last_signal': state['last_signal'],
         'last_price': decimal_or_zero(last_price),
         'base_wallet_source': 'MARGIN_OR_SPOT',
     })
