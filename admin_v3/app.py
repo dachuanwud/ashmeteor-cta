@@ -1018,6 +1018,57 @@ def cta_unified_margin_rebalance_force_route():
     return res
 
 
+@app.route('/cta/unified/overlay/summary', methods=['GET'])
+def cta_unified_overlay_summary_route():
+    strategy = request.args.get('strategy')
+    asset = request.args.get('asset', 'ETH')
+    symbol = request.args.get('symbol', '')
+    interval = request.args.get('interval', '4h')
+    cta = request.args.get('cta', 'adapt_bolling_anti_chase')
+    period = request.args.get('period', '[200,20]')
+    res = make_response(jsonify(cta_unified_overlay_get_summary(
+        binance_list, strategy, asset, symbol, interval, cta, period)))
+    res = decorate_res(res)
+    return res
+
+
+@app.route('/cta/unified/overlay/deploy', methods=['POST', 'OPTIONS'])
+def cta_unified_overlay_deploy_route():
+    if request.method == 'OPTIONS':
+        res = make_response(jsonify({'status': 0, 'msg': ''}))
+        res = decorate_res(res)
+        return res
+    data = request.get_json(silent=True) or request.form or {}
+    res = make_response(jsonify(cta_unified_overlay_deploy(data)))
+    res = decorate_res(res)
+    return res
+
+
+@app.route('/cta/unified/overlay/update_cta', methods=['POST', 'OPTIONS'])
+def cta_unified_overlay_update_cta_route():
+    if request.method == 'OPTIONS':
+        res = make_response(jsonify({'status': 0, 'msg': ''}))
+        res = decorate_res(res)
+        return res
+    data = request.get_json(silent=True) or request.form or {}
+    res = make_response(jsonify(cta_unified_overlay_update_cta(data)))
+    res = decorate_res(res)
+    return res
+
+
+@app.route('/cta/unified/overlay/update_rebalance',
+           methods=['POST', 'OPTIONS'])
+def cta_unified_overlay_update_rebalance_route():
+    if request.method == 'OPTIONS':
+        res = make_response(jsonify({'status': 0, 'msg': ''}))
+        res = decorate_res(res)
+        return res
+    data = request.get_json(silent=True) or request.form or {}
+    res = make_response(jsonify(cta_unified_overlay_update_rebalance(data)))
+    res = decorate_res(res)
+    return res
+
+
 @app.route('/dapi/sell_coin', methods=['GET'])
 def dapi_sell_coin():
     strategy = request.args.get('strategy')

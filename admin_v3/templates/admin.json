@@ -30,6 +30,11 @@
                             "actionType": "reload"
                           },
                           {
+                            "componentId": "u:unified_overlay_summary",
+                            "args": {},
+                            "actionType": "reload"
+                          },
+                          {
                             "componentId": "u:account_topology_summary",
                             "args": {},
                             "actionType": "reload"
@@ -74,6 +79,11 @@
                         "actions": [
                           {
                             "componentId": "u:unified_account_cockpit_dashboard",
+                            "args": {},
+                            "actionType": "reload"
+                          },
+                          {
+                            "componentId": "u:unified_overlay_summary",
                             "args": {},
                             "actionType": "reload"
                           },
@@ -463,6 +473,434 @@
                       "showCloseButton": true,
                       "showErrorMsg": true
                     }
+                  },
+                  {
+                    "type": "crud",
+                    "id": "u:unified_overlay_summary",
+                    "title": "半套 CTA Overlay",
+                    "syncLocation": false,
+                    "api": {
+                      "method": "get",
+                      "url": "/cta/unified/overlay/summary?strategy=${strategy}&asset=ETH"
+                    },
+                    "mode": "table",
+                    "columns": [
+                      {
+                        "name": "strategy",
+                        "label": "账户",
+                        "type": "text"
+                      },
+                      {
+                        "name": "base_asset_qty",
+                        "label": "ETH底仓",
+                        "type": "text"
+                      },
+                      {
+                        "name": "hedge_ratio",
+                        "label": "半套比例",
+                        "type": "text"
+                      },
+                      {
+                        "name": "target_hedge_qty",
+                        "label": "目标半套空头",
+                        "type": "text"
+                      },
+                      {
+                        "name": "current_um_position",
+                        "label": "当前U本位仓位",
+                        "type": "text"
+                      },
+                      {
+                        "name": "net_base_exposure",
+                        "label": "净ETH暴露",
+                        "type": "text"
+                      },
+                      {
+                        "name": "rebalance_running",
+                        "label": "半套状态",
+                        "type": "text"
+                      },
+                      {
+                        "name": "cta_running",
+                        "label": "CTA状态",
+                        "type": "text"
+                      },
+                      {
+                        "name": "cta_trade_ratio",
+                        "label": "CTA策略杠杆 trade_ratio",
+                        "type": "text"
+                      },
+                      {
+                        "name": "cta_signal",
+                        "label": "CTA当前信号",
+                        "type": "text"
+                      },
+                      {
+                        "name": "cta_position_amount",
+                        "label": "CTA当前仓位",
+                        "type": "text"
+                      },
+                      {
+                        "name": "next_action_hint",
+                        "label": "下一步提示",
+                        "type": "text"
+                      }
+                    ],
+                    "bulkActions": [],
+                    "itemActions": [
+                      {
+                        "type": "button",
+                        "label": "部署 CTA overlay",
+                        "level": "primary",
+                        "actionType": "dialog",
+                        "dialog": {
+                          "type": "dialog",
+                          "title": "部署 CTA overlay",
+                          "body": [
+                            {
+                              "type": "form",
+                              "title": "创建或更新U本位CTA记录，不自动启动",
+                              "body": [
+                                {
+                                  "type": "static",
+                                  "name": "strategy",
+                                  "label": "账户",
+                                  "value": "${strategy}"
+                                },
+                                {
+                                  "type": "input-text",
+                                  "name": "symbol",
+                                  "label": "U本位CTA标的",
+                                  "value": "ETHUSDT"
+                                },
+                                {
+                                  "type": "select",
+                                  "name": "interval",
+                                  "label": "时间周期",
+                                  "value": "4h",
+                                  "options": [
+                                    {
+                                      "label": "1h",
+                                      "value": "1h"
+                                    },
+                                    {
+                                      "label": "4h",
+                                      "value": "4h"
+                                    },
+                                    {
+                                      "label": "1d",
+                                      "value": "1d"
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "select",
+                                  "name": "cta",
+                                  "label": "CTA策略",
+                                  "value": "adapt_bolling_anti_chase",
+                                  "options": [
+                                    {
+                                      "label": "自适应布林防追高追空",
+                                      "value": "adapt_bolling_anti_chase"
+                                    },
+                                    {
+                                      "label": "自适应布林",
+                                      "value": "adapt_bolling"
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "input-text",
+                                  "name": "period",
+                                  "label": "CTA参数",
+                                  "value": "[200,20]"
+                                },
+                                {
+                                  "type": "input-number",
+                                  "name": "init_value",
+                                  "label": "CTA初始投入",
+                                  "value": 50,
+                                  "min": 0,
+                                  "step": 1
+                                },
+                                {
+                                  "type": "input-number",
+                                  "name": "trade_ratio",
+                                  "label": "CTA策略杠杆 trade_ratio",
+                                  "value": 1,
+                                  "min": 0,
+                                  "step": 0.1
+                                },
+                                {
+                                  "type": "select",
+                                  "name": "open_tpsl",
+                                  "label": "止盈止损",
+                                  "value": 1,
+                                  "options": [
+                                    {
+                                      "label": "开启",
+                                      "value": 1
+                                    },
+                                    {
+                                      "label": "关闭",
+                                      "value": 0
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "input-number",
+                                  "name": "takeprofit_percentage",
+                                  "label": "止盈比例",
+                                  "value": 0.5,
+                                  "min": 0,
+                                  "step": 0.01
+                                },
+                                {
+                                  "type": "input-number",
+                                  "name": "takeprofit_drawdown_percentage",
+                                  "label": "吊灯止盈回调比例",
+                                  "value": 0.05,
+                                  "min": 0,
+                                  "step": 0.01
+                                },
+                                {
+                                  "type": "input-number",
+                                  "name": "stoploss_percentage",
+                                  "label": "止损比例",
+                                  "value": 0.2,
+                                  "min": 0,
+                                  "step": 0.01
+                                }
+                              ],
+                              "api": {
+                                "method": "post",
+                                "url": "/cta/unified/overlay/deploy",
+                                "data": {
+                                  "strategy": "${strategy}",
+                                  "symbol": "${symbol}",
+                                  "interval": "${interval}",
+                                  "cta": "${cta}",
+                                  "period": "${period}",
+                                  "init_value": "${init_value}",
+                                  "trade_ratio": "${trade_ratio}",
+                                  "open_tpsl": "${open_tpsl}",
+                                  "takeprofit_percentage": "${takeprofit_percentage}",
+                                  "takeprofit_drawdown_percentage": "${takeprofit_drawdown_percentage}",
+                                  "stoploss_percentage": "${stoploss_percentage}"
+                                }
+                              }
+                            }
+                          ],
+                          "showCloseButton": true,
+                          "showErrorMsg": true
+                        }
+                      },
+                      {
+                        "type": "button",
+                        "label": "启动 CTA overlay",
+                        "level": "success",
+                        "visibleOn": "this.cta_exists",
+                        "confirmText": "确定启动CTA overlay？这会启动U本位CTA策略，但不会强制半套。",
+                        "actionType": "ajax",
+                        "api": {
+                          "method": "get",
+                          "url": "/cta/usdt/start?cta_key=${cta_key}"
+                        }
+                      },
+                      {
+                        "type": "button",
+                        "label": "停止 CTA overlay",
+                        "level": "warning",
+                        "visibleOn": "this.cta_exists",
+                        "confirmText": "确定停止CTA overlay？停止不会自动平掉统一账户半套。",
+                        "actionType": "ajax",
+                        "api": {
+                          "method": "get",
+                          "url": "/cta/usdt/stop?cta_key=${cta_key}"
+                        }
+                      },
+                      {
+                        "type": "button",
+                        "label": "加套 / 减套",
+                        "level": "info",
+                        "actionType": "dialog",
+                        "dialog": {
+                          "type": "dialog",
+                          "title": "加套 / 减套",
+                          "body": [
+                            {
+                              "type": "form",
+                              "title": "只调整半套比例，不触发真实下单",
+                              "body": [
+                                {
+                                  "type": "static",
+                                  "name": "strategy",
+                                  "label": "账户",
+                                  "value": "${strategy}"
+                                },
+                                {
+                                  "type": "input-text",
+                                  "name": "asset",
+                                  "label": "资产",
+                                  "value": "ETH"
+                                },
+                                {
+                                  "type": "input-number",
+                                  "name": "hedge_ratio",
+                                  "label": "半套比例",
+                                  "value": "${hedge_ratio}",
+                                  "min": 0,
+                                  "step": 0.1
+                                }
+                              ],
+                              "api": {
+                                "method": "post",
+                                "url": "/cta/unified/overlay/update_rebalance",
+                                "data": {
+                                  "strategy": "${strategy}",
+                                  "asset": "${asset}",
+                                  "hedge_ratio": "${hedge_ratio}"
+                                }
+                              }
+                            }
+                          ],
+                          "showCloseButton": true,
+                          "showErrorMsg": true
+                        }
+                      },
+                      {
+                        "type": "button",
+                        "label": "调整 CTA 策略杠杆",
+                        "level": "info",
+                        "visibleOn": "this.cta_exists",
+                        "actionType": "dialog",
+                        "dialog": {
+                          "type": "dialog",
+                          "title": "调整 CTA 策略杠杆",
+                          "body": [
+                            {
+                              "type": "form",
+                              "title": "只更新CTA参数，不调整交易所合约杠杆",
+                              "body": [
+                                {
+                                  "type": "static",
+                                  "name": "strategy",
+                                  "label": "账户",
+                                  "value": "${strategy}"
+                                },
+                                {
+                                  "type": "input-number",
+                                  "name": "trade_ratio",
+                                  "label": "CTA策略杠杆 trade_ratio",
+                                  "value": "${cta_trade_ratio}",
+                                  "min": 0,
+                                  "step": 0.1
+                                },
+                                {
+                                  "type": "select",
+                                  "name": "open_tpsl",
+                                  "label": "止盈止损",
+                                  "value": "${cta_open_tpsl}",
+                                  "options": [
+                                    {
+                                      "label": "开启",
+                                      "value": 1
+                                    },
+                                    {
+                                      "label": "关闭",
+                                      "value": 0
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "input-number",
+                                  "name": "takeprofit_percentage",
+                                  "label": "止盈比例",
+                                  "value": "${takeprofit_percentage}",
+                                  "min": 0,
+                                  "step": 0.01
+                                },
+                                {
+                                  "type": "input-number",
+                                  "name": "takeprofit_drawdown_percentage",
+                                  "label": "吊灯止盈回调比例",
+                                  "value": "${takeprofit_drawdown_percentage}",
+                                  "min": 0,
+                                  "step": 0.01
+                                },
+                                {
+                                  "type": "input-number",
+                                  "name": "stoploss_percentage",
+                                  "label": "止损比例",
+                                  "value": "${stoploss_percentage}",
+                                  "min": 0,
+                                  "step": 0.01
+                                }
+                              ],
+                              "api": {
+                                "method": "post",
+                                "url": "/cta/unified/overlay/update_cta",
+                                "data": {
+                                  "strategy": "${strategy}",
+                                  "cta_key": "${cta_key}",
+                                  "trade_ratio": "${trade_ratio}",
+                                  "open_tpsl": "${open_tpsl}",
+                                  "takeprofit_percentage": "${takeprofit_percentage}",
+                                  "takeprofit_drawdown_percentage": "${takeprofit_drawdown_percentage}",
+                                  "stoploss_percentage": "${stoploss_percentage}"
+                                }
+                              }
+                            }
+                          ],
+                          "showCloseButton": true,
+                          "showErrorMsg": true
+                        }
+                      },
+                      {
+                        "type": "button",
+                        "label": "交易所合约杠杆",
+                        "level": "default",
+                        "actionType": "dialog",
+                        "dialog": {
+                          "type": "dialog",
+                          "title": "调整交易所合约杠杆",
+                          "body": [
+                            {
+                              "type": "form",
+                              "title": "高级动作：只调整交易所U本位合约杠杆",
+                              "body": [
+                                {
+                                  "type": "static",
+                                  "name": "strategy",
+                                  "label": "账户",
+                                  "value": "${strategy}"
+                                },
+                                {
+                                  "type": "input-number",
+                                  "name": "exchange_leverage",
+                                  "label": "交易所合约杠杆",
+                                  "value": 1,
+                                  "min": 1,
+                                  "step": 1
+                                }
+                              ],
+                              "api": {
+                                "method": "get",
+                                "url": "/api/change_leverage?strategy=${strategy}&type=fapi&leverage=${exchange_leverage}"
+                              }
+                            }
+                          ],
+                          "showCloseButton": true,
+                          "showErrorMsg": true
+                        }
+                      }
+                    ],
+                    "perPage": 10,
+                    "perPageAvailable": [
+                      10
+                    ],
+                    "interval": 60000,
+                    "silentPolling": true
                   },
                   {
                     "type": "tpl",

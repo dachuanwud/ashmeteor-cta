@@ -6985,6 +6985,27 @@ def cta_unified_margin_rebalance_stop(strategy, asset='ETH'):
     return {'status': 0, 'msg': item.last_msg, 'data': item.to_dict()}
 
 
+def cta_unified_margin_rebalance_update_ratio(strategy,
+                                              asset='ETH',
+                                              hedge_ratio='0.5'):
+    if not strategy:
+        return {'status': 500, 'msg': 'strategy不能为空'}
+
+    asset = (asset or 'ETH').upper()
+    item = CtaUnifiedMarginRebalance.query.filter(
+        CtaUnifiedMarginRebalance.strategy == strategy,
+        CtaUnifiedMarginRebalance.asset == asset,
+        CtaUnifiedMarginRebalance.is_del == 0).first()
+    if item is None:
+        return {'status': 500, 'msg': '统一账户半套配置不存在，请先启动统一账户半套'}
+
+    item.hedge_ratio = Decimal(str(hedge_ratio or '0.5'))
+    item.last_status = 0
+    item.last_msg = f'统一账户半套比例已调整为{item.hedge_ratio}，未触发真实下单'
+    db.session.commit()
+    return {'status': 0, 'msg': item.last_msg, 'data': item.to_dict()}
+
+
 def update_unified_margin_rebalance_state(strategy, asset, data):
     if not has_app_context():
         return
@@ -7227,6 +7248,209 @@ def cta_unified_margin_rebalance_force(exchange, strategy, asset):
     return rebalance_unified_margin_asset(exchange, strategy, item.asset,
                                           item.hedge_ratio, True,
                                           hedge_market=item.hedge_market)
+
+
+def cta_unified_overlay_defaults(data=None):
+    data = data or {}
+    asset = (data.get('asset') or 'ETH').upper()
+    symbol = (data.get('symbol') or f'{asset}USDT').upper()
+    interval = data.get('interval') or '4h'
+    cta = data.get('cta') or 'adapt_bolling_anti_chase'
+    period = factors.format_cta_period(data.get('period') or '[200,20]')
+    return {
+        'strategy': data.get('strategy') or '',
+        'asset': asset,
+        'symbol': symbol,
+        'interval': interval,
+        'cta': cta,
+        'period': period,
+        'cta_key': f'{symbol}_{interval}_{cta}_{period}',
+        'init_value': str(data.get('init_value') or '50'),
+        'trade_ratio': str(data.get('trade_ratio') or '1'),
+        'open_tpsl': int(data.get('open_tpsl', 1)),
+        'takeprofit_percentage': str(data.get('takeprofit_percentage')
+                                     or '0.5'),
+        'takeprofit_drawdown_percentage': str(
+            data.get('takeprofit_drawdown_percentage') or '0.05'),
+        'stoploss_percentage': str(data.get('stoploss_percentage') or '0.2'),
+    }
+
+
+def cta_unified_overlay_find_cta(cta_key):
+    return CtaUsdt.query.filter(CtaUsdt.cta_key == cta_key,
+                                CtaUsdt.is_del == 0).first()
+
+
+def cta_unified_overlay_row_to_dict(item):
+    if item is None:
+        return {}
+    if hasattr(item, 'to_dict'):
+        return item.to_dict()
+    if isinstance(item, dict):
+        return item
+    keys = ('id', 'strategy', 'cta_key', 'is_running', 'symbol', 'interval',
+            'cta', 'period', 'signal', 'position_amount', 'init_value',
+            'net_value', 'trade_ratio', 'open_tpsl', 'takeprofit_percentage',
+            'takeprofit_drawdown_percentage', 'stoploss_percentage')
+    return {key: getattr(item, key, '') for key in keys}
+
+
+def cta_unified_overlay_get_summary(binance_list,
+                                    strategy,
+                                    asset='ETH',
+                                    symbol='',
+                                    interval='4h',
+                                    cta='adapt_bolling_anti_chase',
+                                    period='[200,20]'):
+    defaults = cta_unified_overlay_defaults({
+        'strategy': strategy,
+        'asset': asset,
+        'symbol': symbol,
+        'interval': interval,
+        'cta': cta,
+        'period': period,
+    })
+    exchange = get_exchange(binance_list, strategy)
+    account_type = get_exchange_account_type(binance_list, strategy)
+    overview = get_account_v2_overview(exchange, strategy, account_type)
+    dashboard = get_account_v2_overview_section(overview, 'dashboard')
+    dashboard_item = (dashboard.get('data', {}).get('items') or [{}])[0]
+
+    cta_item = cta_unified_overlay_find_cta(defaults['cta_key'])
+    cta_data = cta_unified_overlay_row_to_dict(cta_item)
+    cta_exists = bool(cta_data)
+    cta_running = boolish(cta_data.get('is_running', 0))
+
+    if dashboard_item.get('rebalance_running') != '已启动':
+        next_action_hint = '先启动或检查统一账户半套'
+    elif not cta_exists:
+        next_action_hint = '可部署CTA overlay'
+    elif not cta_running:
+        next_action_hint = '可启动CTA overlay'
+    else:
+        next_action_hint = '半套和CTA overlay已配置运行，关注净ETH暴露'
+
+    row = {
+        'strategy': strategy,
+        'asset': defaults['asset'],
+        'symbol': defaults['symbol'],
+        'interval': defaults['interval'],
+        'cta': defaults['cta'],
+        'period': defaults['period'],
+        'cta_key': defaults['cta_key'],
+        'base_asset_qty': dashboard_item.get('base_asset_qty', 0),
+        'hedge_ratio': dashboard_item.get('hedge_ratio', 0),
+        'target_hedge_qty': dashboard_item.get('target_hedge_qty', 0),
+        'current_um_position': dashboard_item.get('current_um_position', 0),
+        'net_base_exposure': dashboard_item.get('net_base_exposure', 0),
+        'rebalance_running': dashboard_item.get('rebalance_running', '未配置'),
+        'rebalance_live_trade_enabled': dashboard_item.get(
+            'live_trade_enabled', '关闭'),
+        'rebalance_next_action_hint': dashboard_item.get(
+            'next_action_hint', ''),
+        'cta_exists': cta_exists,
+        'cta_running': '已启动' if cta_running else
+        ('已暂停' if cta_exists else '未部署'),
+        'cta_trade_ratio': cta_data.get('trade_ratio', ''),
+        'cta_signal': cta_data.get('signal', ''),
+        'cta_position_amount': cta_data.get('position_amount', ''),
+        'cta_init_value': cta_data.get('init_value', ''),
+        'cta_net_value': cta_data.get('net_value', ''),
+        'cta_open_tpsl': cta_data.get('open_tpsl', ''),
+        'takeprofit_percentage': cta_data.get('takeprofit_percentage', ''),
+        'takeprofit_drawdown_percentage': cta_data.get(
+            'takeprofit_drawdown_percentage', ''),
+        'stoploss_percentage': cta_data.get('stoploss_percentage', ''),
+        'next_action_hint': next_action_hint,
+    }
+    return {'status': 0, 'msg': '', 'data': {'items': [row], 'total': 1}}
+
+
+def cta_unified_overlay_deploy(data):
+    defaults = cta_unified_overlay_defaults(data)
+    if not defaults['strategy']:
+        return {'status': 500, 'msg': 'strategy不能为空'}
+
+    existing = cta_unified_overlay_find_cta(defaults['cta_key'])
+    existing_data = cta_unified_overlay_row_to_dict(existing)
+    if existing_data and existing_data.get('strategy') != defaults['strategy']:
+        return {
+            'status': 500,
+            'msg': f"{defaults['cta_key']}已属于其他账户{existing_data.get('strategy')}",
+        }
+
+    payload = {
+        'strategy': defaults['strategy'],
+        'symbol': defaults['symbol'],
+        'interval': defaults['interval'],
+        'cta': defaults['cta'],
+        'period': defaults['period'],
+        'init_value': defaults['init_value'],
+        'trade_ratio': defaults['trade_ratio'],
+        'open_tpsl': defaults['open_tpsl'],
+        'takeprofit_percentage': defaults['takeprofit_percentage'],
+        'takeprofit_drawdown_percentage':
+            defaults['takeprofit_drawdown_percentage'],
+        'stoploss_percentage': defaults['stoploss_percentage'],
+    }
+
+    if existing_data:
+        payload['id'] = existing_data.get('id')
+        res = cta_usdt_update_strategy(payload)
+        action = 'updated'
+    else:
+        res = cta_usdt_create_strategy(payload)
+        action = 'created'
+    if res.get('status') != 0:
+        return res
+    return {
+        'status': 0,
+        'msg': 'CTA overlay部署完成，未自动启动',
+        'data': {
+            'action': action,
+            'cta_key': defaults['cta_key'],
+            **payload,
+        }
+    }
+
+
+def cta_unified_overlay_update_cta(data):
+    defaults = cta_unified_overlay_defaults(data)
+    if not defaults['strategy']:
+        return {'status': 500, 'msg': 'strategy不能为空'}
+
+    existing = cta_unified_overlay_find_cta(data.get('cta_key')
+                                           or defaults['cta_key'])
+    existing_data = cta_unified_overlay_row_to_dict(existing)
+    if not existing_data:
+        return {'status': 500, 'msg': 'CTA overlay不存在，请先部署'}
+    if existing_data.get('strategy') != defaults['strategy']:
+        return {
+            'status': 500,
+            'msg': f"{existing_data.get('cta_key')}已属于其他账户{existing_data.get('strategy')}",
+        }
+
+    payload = {
+        'id': existing_data.get('id'),
+        'trade_ratio': defaults['trade_ratio'],
+        'open_tpsl': defaults['open_tpsl'],
+        'takeprofit_percentage': defaults['takeprofit_percentage'],
+        'takeprofit_drawdown_percentage':
+            defaults['takeprofit_drawdown_percentage'],
+        'stoploss_percentage': defaults['stoploss_percentage'],
+    }
+    res = cta_usdt_update_strategy(payload)
+    if res.get('status') != 0:
+        return res
+    return {'status': 0, 'msg': 'CTA overlay参数已更新', 'data': payload}
+
+
+def cta_unified_overlay_update_rebalance(data):
+    strategy = data.get('strategy')
+    asset = (data.get('asset') or 'ETH').upper()
+    hedge_ratio = str(data.get('hedge_ratio') or '0.5')
+    return cta_unified_margin_rebalance_update_ratio(strategy, asset,
+                                                     hedge_ratio)
 
 
 def dapi_buy_coin_with_unified_account(exchange, asset, usd_num):
