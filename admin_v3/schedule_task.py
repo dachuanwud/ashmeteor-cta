@@ -273,40 +273,56 @@ def dapi_account_net_value(*args):
     _write_ledger_rows(engine, 'dapi_all_account_value', df)
 
 
-def cta_excute_init(*args):
+def cta_excute_init(*args, **kwargs):
     with scheduler.app.app_context():
         exchange = args[0]
         symbol = args[1]
         interval = args[2]
         cta = args[3]
         period = args[4]
+        account_type = args[5] if len(args) > 5 else ACCOUNT_TYPE_STANDARD
+        sync_last_signal = kwargs.get('sync_last_signal', False)
 
         # 初始化获取10000条K线
         symbol_data = get_kline(exchange, symbol, interval, 10000)
-        cta_key = '_'.join(args[1:])
+        cta_key = '_'.join((symbol, interval, cta, period))
         symbol_data.to_csv(f'{fapi_path}/{cta_key}.csv', index=False)
 
         if interval.find('m') >= 0:  # 添加循环间隔是分钟的子类的定时任务
             scheduler.add_job(id=cta_key,
                               func=cta_excute_period,
-                              args=args,
+                              args=(exchange, symbol, interval, cta, period,
+                                    account_type),
                               trigger='cron',
                               minute='*/' + interval.split('m')[0],
                               misfire_grace_time=300,
-                              max_instances=1)
+                              max_instances=1,
+                              replace_existing=True)
         elif interval.find('h') >= 0:  # 添加循环间隔是小时的子类的定时任务
             scheduler.add_job(id=cta_key,
                               func=cta_excute_period,
-                              args=args,
+                              args=(exchange, symbol, interval, cta, period,
+                                    account_type),
                               trigger='cron',
                               hour='*/' + interval.split('h')[0],
                               misfire_grace_time=300,
-                              max_instances=1)
+                              max_instances=1,
+                              replace_existing=True)
         else:  # 注意暂时未判断按天的策略
             log_print(cta_key, '时间间隔格式错误，请修改')
         cta_usdt_update_trade_info(cta_key, data={'is_running': 1})
         log_print(f'{cta_key}策略启动成功')
         send_wechat(f'{cta_key}策略启动成功')
+        if sync_last_signal:
+            log_print(f'{cta_key}启动后同步上次有效信号开始')
+            cta_excute_period(exchange,
+                              symbol,
+                              interval,
+                              cta,
+                              period,
+                              account_type,
+                              pos_infer=True)
+            log_print(f'{cta_key}启动后同步上次有效信号结束')
         time.sleep(1)
 
 
@@ -317,7 +333,8 @@ def cta_excute_init_all(params_list):
         interval = params[2]
         cta = params[3]
         period = params[4]
-        cta_excute_init(exchange, symbol, interval, cta, period)
+        account_type = params[7] if len(params) > 7 else ACCOUNT_TYPE_STANDARD
+        cta_excute_init(exchange, symbol, interval, cta, period, account_type)
 
 
 def cta_signal_check_all(*args):
@@ -340,12 +357,14 @@ def cta_signal_check_all(*args):
                 continue
 
             exchange = get_exchange(binance_list, strategy)
+            account_type = get_exchange_account_type(binance_list, strategy)
 
             cta_excute_period(exchange,
                               symbol,
                               interval,
                               cta,
                               period,
+                              account_type,
                               pos_infer=config.pos_infer)
 
         # 仓位校准部分
@@ -354,10 +373,20 @@ def cta_signal_check_all(*args):
         cta_strategy_list = list(set([params[0] for params in params_list]))
         for cta_strategy in cta_strategy_list:
             exchange = get_exchange(binance_list, cta_strategy)
-            cta_check_position(exchange, params_list, cta_strategy)
+            account_type = get_exchange_account_type(binance_list,
+                                                     cta_strategy)
+            cta_check_position(exchange, params_list, cta_strategy,
+                               account_type)
 
 
-def cta_check_position(exchange, params_list, cta_strategy):
+def cta_check_position(exchange,
+                       params_list,
+                       cta_strategy,
+                       account_type=ACCOUNT_TYPE_STANDARD):
+    if account_type == ACCOUNT_TYPE_UNIFIED:
+        log_print(f'{cta_strategy}为统一账户，跳过U本位CTA旧仓位校准')
+        return
+
     # 整理策略持仓
     columns = {
         0: 'strategy',
@@ -381,8 +410,9 @@ def cta_check_position(exchange, params_list, cta_strategy):
         'symbol')['策略持仓量'].sum()
 
     # 整理当前持仓
-    position_risk = robust(exchange.fapiPrivateV2_get_positionrisk,
-                           func_name='fapiPrivateV2_get_positionrisk')
+    account = make_binance_account_adapter(exchange, account_type)
+    position_risk = robust(account.get_um_position_risk,
+                           func_name='get_um_position_risk')
     # 将原始数据转化为dataframe
     position_risk = pd.DataFrame(position_risk)
     if position_risk.empty:
@@ -433,9 +463,12 @@ def cta_excute_period(*args, **kwargs):
         interval = args[2]
         cta = args[3]
         period = args[4]
+        account_type = args[5] if len(args) > 5 else ACCOUNT_TYPE_STANDARD
         pos_infer = kwargs.get('pos_infer', False)
+        account = make_binance_account_adapter(exchange, account_type)
+        order_func = account.place_um_order
 
-        cta_key = '_'.join(args[1:])
+        cta_key = '_'.join((symbol, interval, cta, period))
 
         run_time = datetime.now()
         run_time = run_time.replace(second=0, microsecond=0)
@@ -503,9 +536,13 @@ def cta_excute_period(*args, **kwargs):
                 order_amount = float(f'{order_amount:.{min_qty[symbol]}f}')
                 log_print(f'标的{symbol}所需下单量={order_amount}')
                 # 下单并更新数据库
-                if cta_usdt_open_limit_order(exchange, symbol, order_amount,
-                                             min_qty, price_precision,
-                                             last_price):
+                if cta_usdt_open_limit_order(exchange,
+                                             symbol,
+                                             order_amount,
+                                             min_qty,
+                                             price_precision,
+                                             last_price,
+                                             order_func=order_func):
                     log_print(f'{cta_key}下单成功')
                     send_wechat(f'{cta_key}下单成功，signal = {signal}')
                     data = {
@@ -542,9 +579,13 @@ def cta_excute_period(*args, **kwargs):
                 order_amount = float(f'{order_amount:.{min_qty[symbol]}f}')
                 log_print(f'标的{symbol}所需下单量={order_amount}')
                 # 下单并更新数据库
-                if cta_usdt_open_limit_order(exchange, symbol, order_amount,
-                                             min_qty, price_precision,
-                                             last_price):
+                if cta_usdt_open_limit_order(exchange,
+                                             symbol,
+                                             order_amount,
+                                             min_qty,
+                                             price_precision,
+                                             last_price,
+                                             order_func=order_func):
                     log_print(f'{cta_key}下单成功')
                     send_wechat(f'{cta_key}下单成功，signal = {signal}')
                     data = {
@@ -604,9 +645,13 @@ def cta_excute_period(*args, **kwargs):
                 order_amount = float(f'{order_amount:.{min_qty[symbol]}f}')
                 log_print(f'标的{symbol}所需下单量={order_amount}')
                 # 下单并更新数据库
-                if cta_usdt_open_limit_order(exchange, symbol, order_amount,
-                                             min_qty, price_precision,
-                                             last_price):
+                if cta_usdt_open_limit_order(exchange,
+                                             symbol,
+                                             order_amount,
+                                             min_qty,
+                                             price_precision,
+                                             last_price,
+                                             order_func=order_func):
                     log_print(f'{cta_key}下单成功')
                     send_wechat(f'{cta_key}下单成功，signal = {signal}')
                     data = {
@@ -639,7 +684,13 @@ def cta_usdt_replenish_bnb(*args):
         cta_strategy_list = list(set([params[0] for params in params_list]))
         for cta_strategy in cta_strategy_list:
             exchange = get_exchange(binance_list, cta_strategy)
-            account_info = exchange.fapiPrivateV2_get_account()
+            account_type = get_exchange_account_type(binance_list,
+                                                     cta_strategy)
+            if account_type == ACCOUNT_TYPE_UNIFIED:
+                log_print(f'{cta_strategy}为统一账户，跳过U本位BNB补仓任务')
+                continue
+            account = make_binance_account_adapter(exchange, account_type)
+            account_info = account.get_account_summary().get('raw', {})
             BNB_df = pd.DataFrame(account_info['assets'])
             amount_bnb = float(
                 BNB_df[BNB_df['asset'] == 'BNB']['walletBalance'].iloc[0])
@@ -849,6 +900,8 @@ def cta_usdt_takeprofit_and_stoploss(*args):
 
             strategy_name = trade_info['strategy']
             exchange = get_exchange(binance_list, strategy_name)
+            account_type = get_exchange_account_type(binance_list,
+                                                     strategy_name)
 
             symbol = trade_info['symbol']
             pos_amount = Decimal(trade_info['position_amount'])
@@ -891,7 +944,7 @@ def cta_usdt_takeprofit_and_stoploss(*args):
                 # )
                 if condition_sl:
                     t1 = cta_usdt_tpsl_close_order(exchange, trade_info,
-                                                   cta_key)
+                                                   cta_key, account_type)
                     if t1:
                         log_print(
                             f'{cta_key} {direction}{symbol}已止损，亏损{round(profit_ratio, 4) * 100}%'
@@ -904,7 +957,7 @@ def cta_usdt_takeprofit_and_stoploss(*args):
                         send_wechat(f'{cta_key} {direction}{symbol}止损失败，请排查')
                 if condition_tp:
                     t1 = cta_usdt_tpsl_close_order(exchange, trade_info,
-                                                   cta_key)
+                                                   cta_key, account_type)
                     if t1:
                         log_print(
                             f'{cta_key} {direction}{symbol}已止盈，盈利{round(profit_ratio, 4) * 100}%'
@@ -923,7 +976,7 @@ def cta_usdt_takeprofit_and_stoploss(*args):
                 # )
                 if condition_sl:
                     t1 = cta_usdt_tpsl_close_order(exchange, trade_info,
-                                                   cta_key)
+                                                   cta_key, account_type)
                     if t1:
                         log_print(
                             f'{cta_key} {direction}{symbol}已止损，亏损{round(profit_ratio, 4) * 100}%'
@@ -936,7 +989,7 @@ def cta_usdt_takeprofit_and_stoploss(*args):
                         send_wechat(f'{cta_key} {direction}{symbol}止损失败，请排查')
                 if condition_tp:
                     t1 = cta_usdt_tpsl_close_order(exchange, trade_info,
-                                                   cta_key)
+                                                   cta_key, account_type)
                     if t1:
                         log_print(
                             f'{cta_key} {direction}{symbol}已止盈，盈利{round(profit_ratio, 4) * 100}%'

@@ -1129,6 +1129,7 @@ def cta_usdt_update():
 @app.route('/cta/usdt/start', methods=['GET'])
 def cta_usdt_start():
     cta_key = request.args.get('cta_key')
+    sync_last_signal = request.args.get('sync_last_signal') == '1'
     try:
         strategy, symbol, interval, cta, period = cta_usdt_get_startegy_params_by_cta_key(
             cta_key)
@@ -1138,7 +1139,9 @@ def cta_usdt_start():
         return res
 
     exchange = get_exchange(binance_list, strategy)
-    excutor.submit(cta_excute_init, exchange, symbol, interval, cta, period)
+    account_type = get_exchange_account_type(binance_list, strategy)
+    excutor.submit(cta_excute_init, exchange, symbol, interval, cta, period,
+                   account_type, sync_last_signal=sync_last_signal)
     res = make_response(jsonify({'status': 0, 'msg': ''}))
     res = decorate_res(res)
     return res
@@ -1154,7 +1157,10 @@ def cta_usdt_stop():
         log_print(f'{cta_key}定时器已被移除')
     trade_info = cta_usdt_get_trade_info(cta_key)
     exchange = get_exchange(binance_list, trade_info['strategy'])
-    cta_usdt_stop_after(exchange, trade_info, cta_key)  # is_running状态在函数内改变了
+    account_type = get_exchange_account_type(binance_list,
+                                             trade_info['strategy'])
+    cta_usdt_stop_after(exchange, trade_info, cta_key,
+                        account_type)  # is_running状态在函数内改变了
     res = make_response(jsonify({'status': 0, 'msg': ''}))
     res = decorate_res(res)
     return res
@@ -1172,7 +1178,9 @@ def cta_usdt_start_all():
     for params in params_list:
         strategy = params[0]
         exchange = get_exchange(binance_list, strategy)
+        account_type = get_exchange_account_type(binance_list, strategy)
         params[0] = exchange
+        params.append(account_type)
     excutor.submit(cta_excute_init_all, params_list)
     res = make_response(jsonify({'status': 0, 'msg': ''}))
     res = decorate_res(res)
@@ -1190,8 +1198,10 @@ def cta_usdt_stop_all():
             log_print(f'{cta_key}定时器已被移除')
         trade_info = cta_usdt_get_trade_info(cta_key)
         exchange = get_exchange(binance_list, trade_info['strategy'])
+        account_type = get_exchange_account_type(binance_list,
+                                                 trade_info['strategy'])
         cta_usdt_stop_after(exchange, trade_info,
-                            cta_key)  # is_running状态在函数内改变了
+                            cta_key, account_type)  # is_running状态在函数内改变了
     res = make_response(jsonify({'status': 0, 'msg': ''}))
     res = decorate_res(res)
     return res

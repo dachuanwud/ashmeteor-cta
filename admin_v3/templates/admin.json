@@ -2716,6 +2716,19 @@
                               },
                               {
                                 "type": "button",
+                                "label": "启动并同步上一信号",
+                                "actionType": "ajax",
+                                "level": "primary",
+                                "className": "text-danger",
+                                "confirmText": "确定启动并按上一根有效信号同步仓位？统一账户半套场景只调整CTA自己的记账仓位差额，不会按交易所总仓位抹掉半套空头。",
+                                "api": {
+                                  "method": "get",
+                                  "url": "/cta/usdt/start?cta_key=${cta_key}&sync_last_signal=1"
+                                },
+                                "id": "u:cta-usdt-start-sync-last"
+                              },
+                              {
+                                "type": "button",
                                 "label": "停止策略",
                                 "actionType": "ajax",
                                 "level": "warning",
