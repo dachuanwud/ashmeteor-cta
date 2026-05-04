@@ -198,145 +198,151 @@
                   },
                   {
                     "type": "button",
-                    "id": "u:unified_base_asset_buy_preview",
-                    "label": "统一账户底仓买入 - 先预览",
+                    "id": "u:unified_base_asset_buy_wizard",
+                    "label": "统一账户底仓买入",
                     "level": "info",
                     "size": "sm",
                     "actionType": "dialog",
                     "dialog": {
                       "type": "dialog",
-                      "title": "统一账户底仓买入 - 先预览",
+                      "title": "统一账户底仓买入",
                       "body": [
                         {
-                          "type": "form",
-                          "body": [
+                          "type": "tpl",
+                          "tpl": "先预览，确认ETH落在现货/杠杆底仓；需要真实下单时，再进入确认执行并打开真实下单开关。"
+                        },
+                        {
+                          "type": "tabs",
+                          "tabsMode": "line",
+                          "tabs": [
                             {
-                              "type": "input-text",
-                              "name": "asset",
-                              "label": "底仓资产",
-                              "value": "ETH"
-                            },
-                            {
-                              "type": "select",
-                              "name": "buy_mode",
-                              "label": "买入模式",
-                              "value": "margin",
-                              "options": [
+                              "title": "1 预览",
+                              "body": [
                                 {
-                                  "label": "全仓杠杆买入",
-                                  "value": "margin"
-                                },
-                                {
-                                  "label": "现金买入",
-                                  "value": "cash"
+                                  "type": "form",
+                                  "title": "预览杠杆买入与半套计划",
+                                  "body": [
+                                    {
+                                      "type": "input-text",
+                                      "name": "asset",
+                                      "label": "底仓资产",
+                                      "value": "ETH"
+                                    },
+                                    {
+                                      "type": "select",
+                                      "name": "buy_mode",
+                                      "label": "买入模式",
+                                      "value": "margin",
+                                      "options": [
+                                        {
+                                          "label": "全仓杠杆买入",
+                                          "value": "margin"
+                                        },
+                                        {
+                                          "label": "现金买入",
+                                          "value": "cash"
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "type": "input-number",
+                                      "name": "quote_usd",
+                                      "label": "买入名义USDT",
+                                      "min": 10,
+                                      "step": 1
+                                    },
+                                    {
+                                      "type": "input-number",
+                                      "name": "hedge_ratio",
+                                      "label": "U本位半套比例",
+                                      "value": 0.5,
+                                      "min": 0,
+                                      "step": 0.1
+                                    }
+                                  ],
+                                  "api": {
+                                    "method": "post",
+                                    "url": "/cta/unified/base_asset/buy/preview",
+                                    "data": {
+                                      "strategy": "${strategy}",
+                                      "asset": "${asset}",
+                                      "buy_mode": "${buy_mode}",
+                                      "quote_usd": "${quote_usd}",
+                                      "hedge_ratio": "${hedge_ratio}"
+                                    }
+                                  }
                                 }
                               ]
                             },
                             {
-                              "type": "input-number",
-                              "name": "quote_usd",
-                              "label": "买入名义USDT",
-                              "min": 10,
-                              "step": 1
-                            },
-                            {
-                              "type": "input-number",
-                              "name": "hedge_ratio",
-                              "label": "U本位半套比例",
-                              "value": 0.5,
-                              "min": 0,
-                              "step": 0.1
-                            }
-                          ],
-                          "api": {
-                            "method": "post",
-                            "url": "/cta/unified/base_asset/buy/preview",
-                            "data": {
-                              "strategy": "${strategy}",
-                              "asset": "${asset}",
-                              "buy_mode": "${buy_mode}",
-                              "quote_usd": "${quote_usd}",
-                              "hedge_ratio": "${hedge_ratio}"
-                            }
-                          }
-                        }
-                      ],
-                      "showCloseButton": true,
-                      "showErrorMsg": true
-                    }
-                  },
-                  {
-                    "type": "button",
-                    "id": "u:unified_base_asset_buy_execute",
-                    "label": "统一账户底仓买入 - 确认执行",
-                    "level": "danger",
-                    "size": "sm",
-                    "actionType": "dialog",
-                    "dialog": {
-                      "type": "dialog",
-                      "title": "统一账户底仓买入 - 确认执行",
-                      "body": [
-                        {
-                          "type": "form",
-                          "body": [
-                            {
-                              "type": "input-text",
-                              "name": "asset",
-                              "label": "底仓资产",
-                              "value": "ETH"
-                            },
-                            {
-                              "type": "select",
-                              "name": "buy_mode",
-                              "label": "买入模式",
-                              "value": "margin",
-                              "options": [
+                              "title": "2 确认执行",
+                              "body": [
                                 {
-                                  "label": "全仓杠杆买入",
-                                  "value": "margin"
-                                },
-                                {
-                                  "label": "现金买入",
-                                  "value": "cash"
+                                  "type": "form",
+                                  "title": "确认真实买入并触发半套",
+                                  "body": [
+                                    {
+                                      "type": "input-text",
+                                      "name": "asset",
+                                      "label": "底仓资产",
+                                      "value": "ETH"
+                                    },
+                                    {
+                                      "type": "select",
+                                      "name": "buy_mode",
+                                      "label": "买入模式",
+                                      "value": "margin",
+                                      "options": [
+                                        {
+                                          "label": "全仓杠杆买入",
+                                          "value": "margin"
+                                        },
+                                        {
+                                          "label": "现金买入",
+                                          "value": "cash"
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "type": "input-number",
+                                      "name": "quote_usd",
+                                      "label": "买入名义USDT",
+                                      "min": 10,
+                                      "step": 1
+                                    },
+                                    {
+                                      "type": "input-number",
+                                      "name": "hedge_ratio",
+                                      "label": "U本位半套比例",
+                                      "value": 0.5,
+                                      "min": 0,
+                                      "step": 0.1
+                                    },
+                                    {
+                                      "type": "switch",
+                                      "name": "live_trade_enabled",
+                                      "label": "打开真实下单确认执行",
+                                      "trueValue": 1,
+                                      "falseValue": 0,
+                                      "value": 0
+                                    }
+                                  ],
+                                  "api": {
+                                    "method": "post",
+                                    "url": "/cta/unified/base_asset/buy/execute",
+                                    "data": {
+                                      "strategy": "${strategy}",
+                                      "asset": "${asset}",
+                                      "buy_mode": "${buy_mode}",
+                                      "quote_usd": "${quote_usd}",
+                                      "hedge_ratio": "${hedge_ratio}",
+                                      "live_trade_enabled": "${live_trade_enabled}"
+                                    }
+                                  }
                                 }
                               ]
-                            },
-                            {
-                              "type": "input-number",
-                              "name": "quote_usd",
-                              "label": "买入名义USDT",
-                              "min": 10,
-                              "step": 1
-                            },
-                            {
-                              "type": "input-number",
-                              "name": "hedge_ratio",
-                              "label": "U本位半套比例",
-                              "value": 0.5,
-                              "min": 0,
-                              "step": 0.1
-                            },
-                            {
-                              "type": "switch",
-                              "name": "live_trade_enabled",
-                              "label": "真实下单确认",
-                              "trueValue": 1,
-                              "falseValue": 0,
-                              "value": 0
                             }
-                          ],
-                          "api": {
-                            "method": "post",
-                            "url": "/cta/unified/base_asset/buy/execute",
-                            "data": {
-                              "strategy": "${strategy}",
-                              "asset": "${asset}",
-                              "buy_mode": "${buy_mode}",
-                              "quote_usd": "${quote_usd}",
-                              "hedge_ratio": "${hedge_ratio}",
-                              "live_trade_enabled": "${live_trade_enabled}"
-                            }
-                          }
+                          ]
                         }
                       ],
                       "showCloseButton": true,
