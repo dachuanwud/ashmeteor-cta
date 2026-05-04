@@ -1162,6 +1162,118 @@ def get_account_v2_strategy_exposures(strategy, exchange=None):
         return []
 
 
+def find_account_v2_asset(wallet_assets, asset):
+    asset = (asset or '').upper()
+    for item in wallet_assets or []:
+        if (item.get('asset') or '').upper() == asset:
+            return item
+    return {}
+
+
+def find_account_v2_margin_debt(margin_debts, preferred_asset='USDT'):
+    preferred_asset = (preferred_asset or '').upper()
+    for item in margin_debts or []:
+        if (item.get('asset') or '').upper() == preferred_asset:
+            return item
+    return (margin_debts or [{}])[0] if margin_debts else {}
+
+
+def find_account_v2_position(positions, symbol, market_type='UM'):
+    symbol = (symbol or '').upper()
+    market_type = (market_type or '').upper()
+    for item in positions or []:
+        if ((item.get('symbol') or '').upper() == symbol
+                and (item.get('market_type') or '').upper() == market_type):
+            return item
+    return {}
+
+
+def find_account_v2_strategy_exposure(strategy_exposures, asset):
+    asset = (asset or '').upper()
+    for item in strategy_exposures or []:
+        if (item.get('asset') or '').upper() == asset:
+            return item
+    return (strategy_exposures or [{}])[0] if strategy_exposures else {}
+
+
+def build_account_v2_dashboard_items(data, base_asset='ETH'):
+    base_asset = (base_asset or 'ETH').upper()
+    hedge_symbol = f'{base_asset}USDT'
+    wallet_asset = find_account_v2_asset(data.get('wallet_assets', []),
+                                         base_asset)
+    margin_debt = find_account_v2_margin_debt(data.get('margin_debts', []),
+                                              'USDT')
+    exposure = find_account_v2_strategy_exposure(
+        data.get('strategy_exposures', []), base_asset)
+    um_position = find_account_v2_position(data.get('positions', []),
+                                           exposure.get('hedge_symbol')
+                                           or hedge_symbol, 'UM')
+
+    base_qty = decimal_or_zero(wallet_asset.get('margin_or_spot_amount'))
+    if base_qty == 0 and exposure.get('asset_base_qty') not in (None, ''):
+        base_qty = decimal_or_zero(exposure.get('asset_base_qty'))
+    hedge_ratio = decimal_or_zero(exposure.get('hedge_ratio'))
+    target_hedge_qty = decimal_or_zero(exposure.get('target_base_qty'))
+    if target_hedge_qty == 0 and hedge_ratio != 0:
+        target_hedge_qty = base_qty * hedge_ratio
+    current_um_position = decimal_or_zero(
+        exposure.get('current_um_position')
+        if exposure.get('current_um_position') not in (None, '') else
+        um_position.get('position_amount'))
+    net_base_exposure = decimal_or_zero(
+        exposure.get('net_base_exposure')
+        if exposure.get('net_base_exposure') not in (None, '') else
+        base_qty + current_um_position)
+    cta_overlay_position = current_um_position + target_hedge_qty
+
+    return [{
+        'strategy':
+            data.get('strategy', ''),
+        'account_type':
+            data.get('account_type', ''),
+        'account_status':
+            data.get('account_status', ''),
+        'total_equity_usd':
+            data.get('total_equity_usd', 0),
+        'available_usd':
+            data.get('available_usd', 0),
+        'base_wallet_label':
+            '现货/杠杆底仓',
+        'base_asset':
+            base_asset,
+        'base_asset_qty':
+            decimal_to_float(base_qty, 8),
+        'base_asset_usd':
+            decimal_to_float(wallet_asset.get('margin_or_spot_usd'), 4),
+        'debt_asset':
+            margin_debt.get('asset', ''),
+        'debt_amount':
+            decimal_to_float(margin_debt.get('debt_amount'), 8),
+        'debt_usd':
+            decimal_to_float(margin_debt.get('debt_usd'), 4),
+        'hedge_market':
+            'U本位',
+        'hedge_symbol':
+            exposure.get('hedge_symbol') or hedge_symbol,
+        'hedge_ratio':
+            decimal_to_float(hedge_ratio, 4),
+        'target_hedge_qty':
+            decimal_to_float(target_hedge_qty, 8),
+        'current_um_position':
+            decimal_to_float(current_um_position, 8),
+        'cta_overlay_position':
+            decimal_to_float(cta_overlay_position, 8),
+        'net_base_exposure':
+            decimal_to_float(net_base_exposure, 8),
+        'last_msg':
+            exposure.get('last_msg', ''),
+        'workflow':
+            '全仓杠杆买ETH -> 现货/杠杆底仓 -> U本位半套 -> CTA overlay -> 净暴露',
+        'risk_note':
+            '当前半套和 CTA 仍是两套逻辑，共用同一个U本位账户风险；这里的CTA仓位为按半套目标推算的overlay，不是统一目标仓位引擎。',
+    }]
+
+
 def get_account_v2_overview(exchange,
                             strategy,
                             account_type=ACCOUNT_TYPE_STANDARD):
@@ -1310,7 +1422,9 @@ def get_account_v2_overview_section(overview, section):
     if overview.get('status') != 0:
         return overview
     data = overview.get('data', {})
-    if section == 'summary':
+    if section == 'dashboard':
+        items = build_account_v2_dashboard_items(data)
+    elif section == 'summary':
         items = [{
             'strategy': data.get('strategy', ''),
             'account_type': data.get('account_type', ''),

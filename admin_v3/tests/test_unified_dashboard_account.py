@@ -1,6 +1,7 @@
 import os
 import sys
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
@@ -162,6 +163,42 @@ class UnifiedCrossMarginEthExchange(UnifiedDashboardExchange):
             'cmUnrealizedPNL': '0',
             'umWalletBalance': '0',
             'umUnrealizedPNL': '0',
+        }]
+
+
+class UnifiedCockpitExchange(UnifiedDashboardExchange):
+    def papiGetUmPositionRisk(self, params=None):
+        return [{
+            'symbol': 'ETHUSDT',
+            'positionAmt': '-0.3',
+            'entryPrice': '2500',
+            'notional': '-750',
+            'unRealizedProfit': '8',
+        }]
+
+    def papiGetBalance(self):
+        return [{
+            'asset': 'ETH',
+            'totalWalletBalance': '0.5',
+            'crossMarginFree': '0.45',
+            'crossMarginLocked': '0.05',
+            'crossMarginBorrowed': '0',
+            'crossMarginInterest': '0',
+            'umWalletBalance': '0',
+            'umUnrealizedPNL': '0',
+            'cmWalletBalance': '0',
+            'cmUnrealizedPNL': '0',
+        }, {
+            'asset': 'USDT',
+            'totalWalletBalance': '-25.1',
+            'crossMarginFree': '0',
+            'crossMarginLocked': '0',
+            'crossMarginBorrowed': '25',
+            'crossMarginInterest': '0.1',
+            'umWalletBalance': '0',
+            'umUnrealizedPNL': '0',
+            'cmWalletBalance': '0',
+            'cmUnrealizedPNL': '0',
         }]
 
 
@@ -333,6 +370,42 @@ class UnifiedDashboardAccountTest(unittest.TestCase):
         self.assertEqual(eth['asset'], 'ETH')
         self.assertEqual(eth['margin_or_spot_amount'], 0.04)
         self.assertTrue(eth['is_base_asset_available'])
+
+    def test_account_v2_dashboard_summarizes_base_debt_hedge_and_cta_overlay(self):
+        exposure = {
+            'asset': 'ETH',
+            'hedge_symbol': 'ETHUSDT',
+            'hedge_ratio': 0.5,
+            'asset_base_qty': 0.5,
+            'target_base_qty': 0.25,
+            'current_um_position': -0.3,
+            'net_base_exposure': 0.2,
+            'last_msg': '半套执行成功',
+        }
+
+        with patch('functions.get_account_v2_strategy_exposures',
+                   return_value=[exposure]):
+            overview = get_account_v2_overview(UnifiedCockpitExchange(),
+                                               'admin_v3_unified', 'unified')
+
+        dashboard = get_account_v2_overview_section(overview, 'dashboard')
+        row = dashboard['data']['items'][0]
+
+        self.assertEqual(row['strategy'], 'admin_v3_unified')
+        self.assertEqual(row['base_wallet_label'], '现货/杠杆底仓')
+        self.assertEqual(row['base_asset'], 'ETH')
+        self.assertEqual(row['base_asset_qty'], 0.5)
+        self.assertEqual(row['base_asset_usd'], 1500.0)
+        self.assertEqual(row['debt_asset'], 'USDT')
+        self.assertEqual(row['debt_amount'], 25.1)
+        self.assertEqual(row['hedge_market'], 'U本位')
+        self.assertEqual(row['hedge_symbol'], 'ETHUSDT')
+        self.assertEqual(row['hedge_ratio'], 0.5)
+        self.assertEqual(row['target_hedge_qty'], 0.25)
+        self.assertEqual(row['current_um_position'], -0.3)
+        self.assertEqual(row['cta_overlay_position'], -0.05)
+        self.assertEqual(row['net_base_exposure'], 0.2)
+        self.assertIn('两套逻辑', row['risk_note'])
 
 
 if __name__ == '__main__':

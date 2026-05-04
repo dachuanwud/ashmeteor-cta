@@ -7,7 +7,7 @@
             "id": "u:aec2ce52703d",
             "tabs": [
               {
-                "title": "账户拓扑",
+                "title": "统一账户驾驶舱",
                 "body": [
                   {
                     "type": "select",
@@ -15,6 +15,7 @@
                     "label": "账户选择",
                     "name": "strategy",
                     "selectFirst": true,
+                    "value": "admin_v3_unified",
                     "mode": "inline",
                     "source": "/account/list",
                     "size": "sm",
@@ -23,6 +24,11 @@
                     "onEvent": {
                       "change": {
                         "actions": [
+                          {
+                            "componentId": "u:unified_account_cockpit_dashboard",
+                            "args": {},
+                            "actionType": "reload"
+                          },
                           {
                             "componentId": "u:account_topology_summary",
                             "args": {},
@@ -60,12 +66,17 @@
                   {
                     "type": "button",
                     "id": "u:account_topology_reload",
-                    "label": "刷新账户拓扑",
+                    "label": "刷新驾驶舱",
                     "level": "primary",
                     "size": "sm",
                     "onEvent": {
                       "click": {
                         "actions": [
+                          {
+                            "componentId": "u:unified_account_cockpit_dashboard",
+                            "args": {},
+                            "actionType": "reload"
+                          },
                           {
                             "componentId": "u:account_topology_summary",
                             "args": {},
@@ -101,15 +112,100 @@
                     }
                   },
                   {
+                    "type": "tpl",
+                    "tpl": "全仓杠杆买ETH -> 现货/杠杆底仓 -> U本位半套 -> CTA overlay -> 净暴露。当前半套和 CTA 仍是两套逻辑，共用同一个U本位账户风险，本页先帮助你看清资金、负债和净暴露。"
+                  },
+                  {
+                    "type": "crud",
+                    "id": "u:unified_account_cockpit_dashboard",
+                    "title": "核心策略视角",
+                    "syncLocation": false,
+                    "api": {
+                      "method": "get",
+                      "url": "/account/v2/overview?strategy=${strategy}&section=dashboard"
+                    },
+                    "mode": "table",
+                    "columns": [
+                      {
+                        "name": "strategy",
+                        "label": "账户",
+                        "type": "text"
+                      },
+                      {
+                        "name": "account_status",
+                        "label": "账户状态",
+                        "type": "text"
+                      },
+                      {
+                        "name": "total_equity_usd",
+                        "label": "总净值(USD)",
+                        "type": "text"
+                      },
+                      {
+                        "name": "base_asset_qty",
+                        "label": "ETH底仓",
+                        "type": "text"
+                      },
+                      {
+                        "name": "base_asset_usd",
+                        "label": "底仓折算USD",
+                        "type": "text"
+                      },
+                      {
+                        "name": "debt_amount",
+                        "label": "USDT负债",
+                        "type": "text"
+                      },
+                      {
+                        "name": "hedge_ratio",
+                        "label": "半套比例",
+                        "type": "text"
+                      },
+                      {
+                        "name": "target_hedge_qty",
+                        "label": "目标U本位空头",
+                        "type": "text"
+                      },
+                      {
+                        "name": "current_um_position",
+                        "label": "当前U本位仓位",
+                        "type": "text"
+                      },
+                      {
+                        "name": "cta_overlay_position",
+                        "label": "CTA仓位(推算)",
+                        "type": "text"
+                      },
+                      {
+                        "name": "net_base_exposure",
+                        "label": "净ETH暴露",
+                        "type": "text"
+                      },
+                      {
+                        "name": "last_msg",
+                        "label": "最近结果",
+                        "type": "text"
+                      }
+                    ],
+                    "bulkActions": [],
+                    "itemActions": [],
+                    "perPage": 10,
+                    "perPageAvailable": [
+                      10
+                    ],
+                    "interval": 60000,
+                    "silentPolling": true
+                  },
+                  {
                     "type": "button",
                     "id": "u:unified_base_asset_buy_preview",
-                    "label": "统一账户底仓买入预览",
+                    "label": "统一账户底仓买入 - 先预览",
                     "level": "info",
                     "size": "sm",
                     "actionType": "dialog",
                     "dialog": {
                       "type": "dialog",
-                      "title": "统一账户底仓买入预览",
+                      "title": "统一账户底仓买入 - 先预览",
                       "body": [
                         {
                           "type": "form",
@@ -172,13 +268,13 @@
                   {
                     "type": "button",
                     "id": "u:unified_base_asset_buy_execute",
-                    "label": "执行统一账户底仓买入",
+                    "label": "统一账户底仓买入 - 确认执行",
                     "level": "danger",
                     "size": "sm",
                     "actionType": "dialog",
                     "dialog": {
                       "type": "dialog",
-                      "title": "执行统一账户底仓买入",
+                      "title": "统一账户底仓买入 - 确认执行",
                       "body": [
                         {
                           "type": "form",
@@ -246,6 +342,10 @@
                       "showCloseButton": true,
                       "showErrorMsg": true
                     }
+                  },
+                  {
+                    "type": "tpl",
+                    "tpl": "高级明细/调试：下面保留账户总览、账户资金、资产归属、杠杆负债、持仓暴露和半套与CTA风险明细，方便排查但不作为第一决策入口。"
                   },
                   {
                     "type": "crud",
@@ -323,7 +423,7 @@
                   {
                     "type": "crud",
                     "id": "u:account_topology_wallets",
-                    "title": "钱包拓扑",
+                    "title": "账户资金",
                     "syncLocation": false,
                     "api": {
                       "method": "get",
@@ -338,7 +438,7 @@
                       },
                       {
                         "name": "wallet_type",
-                        "label": "内部类型",
+                        "label": "账户分区",
                         "type": "text"
                       },
                       {
@@ -389,7 +489,7 @@
                   {
                     "type": "crud",
                     "id": "u:account_topology_wallet_assets",
-                    "title": "资产桶明细",
+                    "title": "资产归属",
                     "syncLocation": false,
                     "api": {
                       "method": "get",
@@ -404,7 +504,7 @@
                       },
                       {
                         "name": "margin_or_spot_amount",
-                        "label": "现货/杠杆数量",
+                        "label": "现货/杠杆底仓",
                         "type": "text"
                       },
                       {
@@ -460,7 +560,7 @@
                   {
                     "type": "crud",
                     "id": "u:account_topology_margin_debts",
-                    "title": "现货/杠杆负债",
+                    "title": "杠杆负债",
                     "syncLocation": false,
                     "api": {
                       "method": "get",
@@ -582,7 +682,7 @@
                   {
                     "type": "crud",
                     "id": "u:account_topology_exposures",
-                    "title": "半套与策略暴露",
+                    "title": "半套与 CTA 风险",
                     "syncLocation": false,
                     "api": {
                       "method": "get",

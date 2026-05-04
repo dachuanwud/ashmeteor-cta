@@ -13,7 +13,18 @@ class AdminTemplateSchemaTest(unittest.TestCase):
         with open(admin_json, encoding='utf-8') as f:
             schema = f.read()
 
-        self.assertIn('"title": "账户拓扑"', schema)
+        self.assertIn('"title": "统一账户驾驶舱"', schema)
+        self.assertIn('"title": "账户资金"', schema)
+        self.assertIn('"title": "资产归属"', schema)
+        self.assertIn('"title": "杠杆负债"', schema)
+        self.assertIn('"title": "半套与 CTA 风险"', schema)
+        self.assertIn('现货/杠杆底仓', schema)
+        self.assertIn('当前半套和 CTA 仍是两套逻辑', schema)
+        self.assertNotIn('"title": "账户拓扑"', schema)
+        self.assertNotIn('"title": "钱包拓扑"', schema)
+        self.assertNotIn('"title": "资产桶明细"', schema)
+        self.assertNotIn('"title": "现货/杠杆负债"', schema)
+        self.assertNotIn('"title": "半套与策略暴露"', schema)
         self.assertIn('/admin/schema', html)
         self.assertNotIn('let amisJSON = {', html)
 
