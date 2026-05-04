@@ -81,6 +81,7 @@ class Strategy(db.Model):
         nullable=False,
         server_default=text("CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"),
         comment='上次更新时间')
+
     is_main = Column(TINYINT,
                     nullable=False,
                     server_default=text("'0'"),
@@ -536,3 +537,114 @@ class CtaUnifiedMarginRebalance(db.Model):
         nullable=False,
         server_default=text("CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"),
         comment='上次更新时间')
+
+
+class CtaUnifiedHalfsetMode(db.Model):
+    __tablename__ = 'cta_unified_halfset_mode'
+
+    def to_dict(self):
+        return {
+            c.name: getattr(self, c.name, None)
+            for c in self.__table__.columns
+        }
+
+    id = Column(INTEGER, primary_key=True, comment='ID')
+    strategy = Column(VARCHAR(255),
+                      nullable=False,
+                      server_default=text("''"),
+                      comment='统一账户策略名称')
+    asset = Column(VARCHAR(64),
+                   nullable=False,
+                   server_default=text("''"),
+                   comment='现货/杠杆底仓资产')
+    spot_symbol = Column(VARCHAR(64),
+                         nullable=False,
+                         server_default=text("''"),
+                         comment='底仓买入交易对')
+    hedge_symbol = Column(VARCHAR(64),
+                          nullable=False,
+                          server_default=text("''"),
+                          comment='U本位协调交易对')
+    cta_key = Column(VARCHAR(255),
+                     nullable=False,
+                     server_default=text("''"),
+                     comment='CTA策略唯一标识')
+    interval = Column(VARCHAR(64),
+                      nullable=False,
+                      server_default=text("'4h'"),
+                      comment='CTA周期')
+    cta = Column(VARCHAR(255),
+                 nullable=False,
+                 server_default=text("'adapt_bolling_anti_chase'"),
+                 comment='CTA策略名称')
+    period = Column(VARCHAR(255),
+                    nullable=False,
+                    server_default=text("'[200,20]'"),
+                    comment='CTA参数')
+    hedge_ratio = Column(DECIMAL(10, 4),
+                         nullable=False,
+                         server_default=text("'0.5000'"),
+                         comment='半套比例')
+    cta_sizing_mode = Column(VARCHAR(32),
+                             nullable=False,
+                             server_default=text("'auto_remaining'"),
+                             comment='CTA仓位模式')
+    cta_budget_usd = Column(DECIMAL(20, 4),
+                            nullable=False,
+                            server_default=text("'0.0000'"),
+                            comment='手动CTA名义USDT')
+    cta_trade_ratio = Column(DECIMAL(10, 4),
+                             nullable=False,
+                             server_default=text("'1.0000'"),
+                             comment='CTA策略杠杆')
+    is_running = Column(TINYINT,
+                        nullable=False,
+                        server_default=text("'0'"),
+                        comment='是否启用完整半套模式')
+    live_trade_enabled = Column(TINYINT,
+                                nullable=False,
+                                server_default=text("'0'"),
+                                comment='是否允许协调器真实下单')
+    half_target_qty = Column(DECIMAL(20, 8),
+                             nullable=False,
+                             server_default=text("'0.00000000'"),
+                             comment='半套记账目标')
+    cta_target_qty = Column(DECIMAL(20, 8),
+                            nullable=False,
+                            server_default=text("'0.00000000'"),
+                            comment='CTA记账目标')
+    total_target_qty = Column(DECIMAL(20, 8),
+                              nullable=False,
+                              server_default=text("'0.00000000'"),
+                              comment='U本位合成目标')
+    current_um_position = Column(DECIMAL(20, 8),
+                                 nullable=False,
+                                 server_default=text("'0.00000000'"),
+                                 comment='当前交易所U本位仓位')
+    order_delta_qty = Column(DECIMAL(20, 8),
+                             nullable=False,
+                             server_default=text("'0.00000000'"),
+                             comment='待协调下单差额')
+    last_signal = Column(INTEGER,
+                         nullable=False,
+                         server_default=text("'0'"),
+                         comment='最近CTA信号')
+    last_signal_time = Column(DateTime, comment='最近CTA信号时间')
+    last_reconcile_time = Column(DateTime, comment='最近协调时间')
+    last_status = Column(INTEGER,
+                         nullable=False,
+                         server_default=text("'0'"),
+                         comment='最近协调状态')
+    last_msg = Column(VARCHAR(255),
+                      nullable=False,
+                      server_default=text("''"),
+                      comment='最近协调提示')
+    is_del = Column(TINYINT,
+                    nullable=False,
+                    server_default=text("'0'"),
+                    comment='是否软删除')
+    update_time = Column(
+        TIMESTAMP,
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"),
+        comment='更新时间')

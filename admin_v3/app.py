@@ -1071,6 +1071,130 @@ def cta_unified_overlay_update_rebalance_route():
     return res
 
 
+@app.route('/cta/unified/halfset/summary', methods=['GET'])
+def cta_unified_halfset_summary_route():
+    strategy = request.args.get('strategy')
+    asset = request.args.get('asset', 'ETH')
+    res = make_response(jsonify(
+        cta_unified_halfset_get_summary(binance_list, strategy, asset)))
+    res = decorate_res(res)
+    return res
+
+
+@app.route('/cta/unified/halfset/configure', methods=['POST', 'OPTIONS'])
+def cta_unified_halfset_configure_route():
+    if request.method == 'OPTIONS':
+        res = make_response(jsonify({'status': 0, 'msg': ''}))
+        res = decorate_res(res)
+        return res
+    data = request.get_json(silent=True) or request.form or {}
+    res = make_response(jsonify(
+        cta_unified_halfset_configure(data, binance_list)))
+    res = decorate_res(res)
+    return res
+
+
+@app.route('/cta/unified/halfset/start', methods=['POST', 'OPTIONS'])
+def cta_unified_halfset_start_route():
+    if request.method == 'OPTIONS':
+        res = make_response(jsonify({'status': 0, 'msg': ''}))
+        res = decorate_res(res)
+        return res
+    data = request.get_json(silent=True) or request.form or {}
+    res = make_response(jsonify(cta_unified_halfset_start(data)))
+    res = decorate_res(res)
+    return res
+
+
+@app.route('/cta/unified/halfset/stop', methods=['POST', 'OPTIONS'])
+def cta_unified_halfset_stop_route():
+    if request.method == 'OPTIONS':
+        res = make_response(jsonify({'status': 0, 'msg': ''}))
+        res = decorate_res(res)
+        return res
+    data = request.get_json(silent=True) or request.form or {}
+    res = make_response(jsonify(cta_unified_halfset_stop(data)))
+    res = decorate_res(res)
+    return res
+
+
+@app.route('/cta/unified/halfset/reconcile/preview',
+           methods=['POST', 'OPTIONS'])
+def cta_unified_halfset_reconcile_preview_route():
+    if request.method == 'OPTIONS':
+        res = make_response(jsonify({'status': 0, 'msg': ''}))
+        res = decorate_res(res)
+        return res
+    data = request.get_json(silent=True) or request.form or {}
+    strategy = data.get('strategy')
+    asset = data.get('asset', 'ETH')
+    exchange = get_exchange(binance_list, strategy)
+    halfset = cta_unified_halfset_get_config(strategy, asset)
+    res = make_response(jsonify(reconcile_unified_halfset_position(
+        exchange,
+        halfset or {
+            'strategy': strategy,
+            'asset': asset,
+            'hedge_ratio': data.get('hedge_ratio', '0.5'),
+            'cta_sizing_mode': data.get('cta_sizing_mode', 'auto_remaining'),
+            'cta_budget_usd': data.get('cta_budget_usd', '0'),
+            'cta_trade_ratio': data.get('cta_trade_ratio', '1'),
+            'last_signal': data.get('signal', 0),
+        },
+        live_trade_enabled=False)))
+    res = decorate_res(res)
+    return res
+
+
+@app.route('/cta/unified/halfset/reconcile/execute',
+           methods=['POST', 'OPTIONS'])
+def cta_unified_halfset_reconcile_execute_route():
+    if request.method == 'OPTIONS':
+        res = make_response(jsonify({'status': 0, 'msg': ''}))
+        res = decorate_res(res)
+        return res
+    data = request.get_json(silent=True) or request.form or {}
+    strategy = data.get('strategy')
+    asset = data.get('asset', 'ETH')
+    if not boolish(data.get('live_trade_enabled', 0)):
+        res = make_response(jsonify({'status': 500, 'msg': '未开启真实下单'}))
+        res = decorate_res(res)
+        return res
+    exchange = get_exchange(binance_list, strategy)
+    halfset = cta_unified_halfset_get_config(strategy, asset)
+    res = make_response(jsonify(reconcile_unified_halfset_position(
+        exchange,
+        halfset or {
+            'strategy': strategy,
+            'asset': asset,
+            'hedge_ratio': data.get('hedge_ratio', '0.5'),
+            'cta_sizing_mode': data.get('cta_sizing_mode', 'auto_remaining'),
+            'cta_budget_usd': data.get('cta_budget_usd', '0'),
+            'cta_trade_ratio': data.get('cta_trade_ratio', '1'),
+            'last_signal': data.get('signal', 0),
+            'live_trade_enabled': 1,
+        },
+        live_trade_enabled=True)))
+    res = decorate_res(res)
+    return res
+
+
+@app.route('/cta/unified/halfset/sync_last_signal',
+           methods=['POST', 'OPTIONS'])
+def cta_unified_halfset_sync_last_signal_route():
+    if request.method == 'OPTIONS':
+        res = make_response(jsonify({'status': 0, 'msg': ''}))
+        res = decorate_res(res)
+        return res
+    data = request.get_json(silent=True) or request.form or {}
+    strategy = data.get('strategy')
+    exchange = get_exchange(binance_list, strategy)
+    res = make_response(jsonify(
+        cta_unified_halfset_sync_last_signal(exchange, data)))
+    res = decorate_res(res)
+    return res
+
+
 @app.route('/dapi/sell_coin', methods=['GET'])
 def dapi_sell_coin():
     strategy = request.args.get('strategy')

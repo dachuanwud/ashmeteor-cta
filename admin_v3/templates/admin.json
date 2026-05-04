@@ -29,15 +29,20 @@
                             "args": {},
                             "actionType": "reload"
                           },
-                          {
-                            "componentId": "u:unified_overlay_summary",
-                            "args": {},
-                            "actionType": "reload"
-                          },
-                          {
-                            "componentId": "u:account_topology_summary",
-                            "args": {},
-                            "actionType": "reload"
+                        {
+                          "componentId": "u:unified_overlay_summary",
+                          "args": {},
+                          "actionType": "reload"
+                        },
+                        {
+                          "componentId": "u:unified_halfset_mode",
+                          "args": {},
+                          "actionType": "reload"
+                        },
+                        {
+                          "componentId": "u:account_topology_summary",
+                          "args": {},
+                          "actionType": "reload"
                           },
                           {
                             "componentId": "u:account_topology_wallets",
@@ -82,15 +87,20 @@
                             "args": {},
                             "actionType": "reload"
                           },
-                          {
-                            "componentId": "u:unified_overlay_summary",
-                            "args": {},
-                            "actionType": "reload"
-                          },
-                          {
-                            "componentId": "u:account_topology_summary",
-                            "args": {},
-                            "actionType": "reload"
+                        {
+                          "componentId": "u:unified_overlay_summary",
+                          "args": {},
+                          "actionType": "reload"
+                        },
+                        {
+                          "componentId": "u:unified_halfset_mode",
+                          "args": {},
+                          "actionType": "reload"
+                        },
+                        {
+                          "componentId": "u:account_topology_summary",
+                          "args": {},
+                          "actionType": "reload"
                           },
                           {
                             "componentId": "u:account_topology_wallets",
@@ -503,6 +513,252 @@
                       "showCloseButton": true,
                       "showErrorMsg": true
                     }
+                  },
+                  {
+                    "type": "crud",
+                    "id": "u:unified_halfset_mode",
+                    "title": "完整半套模式",
+                    "syncLocation": false,
+                    "api": {
+                      "method": "get",
+                      "url": "/cta/unified/halfset/summary?strategy=${strategy}&asset=ETH"
+                    },
+                    "mode": "table",
+                    "columns": [
+                      {
+                        "name": "strategy",
+                        "label": "账户",
+                        "type": "text"
+                      },
+                      {
+                        "name": "asset",
+                        "label": "底仓资产",
+                        "type": "text"
+                      },
+                      {
+                        "name": "base_qty",
+                        "label": "现货/杠杆底仓B",
+                        "type": "text"
+                      },
+                      {
+                        "name": "hedge_ratio",
+                        "label": "半套比例H",
+                        "type": "text"
+                      },
+                      {
+                        "name": "half_target_qty",
+                        "label": "半套记账目标",
+                        "type": "text"
+                      },
+                      {
+                        "name": "last_signal",
+                        "label": "CTA信号",
+                        "type": "text"
+                      },
+                      {
+                        "name": "cta_target_qty",
+                        "label": "CTA记账目标",
+                        "type": "text"
+                      },
+                      {
+                        "name": "total_target_qty",
+                        "label": "U本位总目标",
+                        "type": "text"
+                      },
+                      {
+                        "name": "current_um_position",
+                        "label": "当前U本位仓位",
+                        "type": "text"
+                      },
+                      {
+                        "name": "order_delta_qty",
+                        "label": "待下单差额",
+                        "type": "text"
+                      },
+                      {
+                        "name": "mode_status",
+                        "label": "模式状态",
+                        "type": "text"
+                      },
+                      {
+                        "name": "next_action_hint",
+                        "label": "下一步提示",
+                        "type": "text"
+                      }
+                    ],
+                    "bulkActions": [],
+                    "itemActions": [
+                      {
+                        "type": "button",
+                        "label": "配置完整半套",
+                        "level": "primary",
+                        "actionType": "dialog",
+                        "dialog": {
+                          "type": "dialog",
+                          "title": "配置完整半套模式",
+                          "body": [
+                            {
+                              "type": "form",
+                              "title": "半套和CTA只记账，真实U本位仓位由协调器合成",
+                              "body": [
+                                {
+                                  "type": "static",
+                                  "name": "strategy",
+                                  "label": "账户",
+                                  "value": "${strategy}"
+                                },
+                                {
+                                  "type": "input-text",
+                                  "name": "asset",
+                                  "label": "底仓资产",
+                                  "value": "${asset || 'ETH'}"
+                                },
+                                {
+                                  "type": "input-number",
+                                  "name": "hedge_ratio",
+                                  "label": "半套比例",
+                                  "value": "${hedge_ratio || 0.5}",
+                                  "min": 0,
+                                  "max": 1,
+                                  "step": 0.1
+                                },
+                                {
+                                  "type": "select",
+                                  "name": "cta_sizing_mode",
+                                  "label": "CTA仓位模式",
+                                  "value": "${cta_sizing_mode || 'auto_remaining'}",
+                                  "options": [
+                                    {
+                                      "label": "自动覆盖剩余半仓",
+                                      "value": "auto_remaining"
+                                    },
+                                    {
+                                      "label": "手动USDT投入",
+                                      "value": "manual_usd"
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "input-number",
+                                  "name": "cta_budget_usd",
+                                  "label": "手动CTA投入USDT",
+                                  "value": "${cta_budget_usd || 0}",
+                                  "min": 0,
+                                  "step": 1
+                                },
+                                {
+                                  "type": "input-number",
+                                  "name": "cta_trade_ratio",
+                                  "label": "CTA策略杠杆",
+                                  "value": "${cta_trade_ratio || 1}",
+                                  "min": 0,
+                                  "step": 0.1
+                                },
+                                {
+                                  "type": "switch",
+                                  "name": "live_trade_enabled",
+                                  "label": "允许协调器真实下单",
+                                  "trueValue": 1,
+                                  "falseValue": 0,
+                                  "value": "${live_trade_enabled || 0}"
+                                }
+                              ],
+                              "api": {
+                                "method": "post",
+                                "url": "/cta/unified/halfset/configure",
+                                "data": {
+                                  "strategy": "${strategy}",
+                                  "asset": "${asset}",
+                                  "hedge_ratio": "${hedge_ratio}",
+                                  "cta_sizing_mode": "${cta_sizing_mode}",
+                                  "cta_budget_usd": "${cta_budget_usd}",
+                                  "cta_trade_ratio": "${cta_trade_ratio}",
+                                  "live_trade_enabled": "${live_trade_enabled}"
+                                }
+                              }
+                            }
+                          ],
+                          "showCloseButton": true,
+                          "showErrorMsg": true
+                        }
+                      },
+                      {
+                        "type": "button",
+                        "label": "启动完整半套",
+                        "level": "success",
+                        "confirmText": "确定启动完整半套模式？启动不会自动下单，执行协调需要单独确认。",
+                        "actionType": "ajax",
+                        "api": {
+                          "method": "post",
+                          "url": "/cta/unified/halfset/start",
+                          "data": {
+                            "strategy": "${strategy}",
+                            "asset": "${asset}",
+                            "live_trade_enabled": "${live_trade_enabled}"
+                          }
+                        }
+                      },
+                      {
+                        "type": "button",
+                        "label": "暂停完整半套",
+                        "level": "warning",
+                        "confirmText": "确定暂停完整半套模式？不会自动平仓。",
+                        "actionType": "ajax",
+                        "api": {
+                          "method": "post",
+                          "url": "/cta/unified/halfset/stop",
+                          "data": {
+                            "strategy": "${strategy}",
+                            "asset": "${asset}"
+                          }
+                        }
+                      },
+                      {
+                        "type": "button",
+                        "label": "同步上一信号",
+                        "level": "info",
+                        "confirmText": "确定同步CTA上一信号并触发协调器重算？",
+                        "actionType": "ajax",
+                        "api": {
+                          "method": "post",
+                          "url": "/cta/unified/halfset/sync_last_signal",
+                          "data": {
+                            "strategy": "${strategy}",
+                            "asset": "${asset}"
+                          }
+                        }
+                      },
+                      {
+                        "type": "button",
+                        "label": "预览协调",
+                        "level": "info",
+                        "actionType": "ajax",
+                        "api": {
+                          "method": "post",
+                          "url": "/cta/unified/halfset/reconcile/preview",
+                          "data": {
+                            "strategy": "${strategy}",
+                            "asset": "${asset}"
+                          }
+                        }
+                      },
+                      {
+                        "type": "button",
+                        "label": "执行协调",
+                        "level": "danger",
+                        "confirmText": "确定执行协调？只有开启真实下单时才会真实调整U本位总仓位。",
+                        "actionType": "ajax",
+                        "api": {
+                          "method": "post",
+                          "url": "/cta/unified/halfset/reconcile/execute",
+                          "data": {
+                            "strategy": "${strategy}",
+                            "asset": "${asset}",
+                            "live_trade_enabled": "${live_trade_enabled}"
+                          }
+                        }
+                      }
+                    ]
                   },
                   {
                     "type": "crud",

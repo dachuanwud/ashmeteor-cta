@@ -509,6 +509,31 @@ def cta_excute_period(*args, **kwargs):
         signal = df.iloc[-1]['signal']
         log_print(f'{cta_key}本次下单信号为{signal}')
 
+        halfset_signal_valid = signal is not None
+        try:
+            halfset_signal_valid = halfset_signal_valid and not np.isnan(signal)
+        except TypeError:
+            pass
+        if halfset_signal_valid:
+            halfset = cta_unified_halfset_get_active_by_cta_key(cta_key)
+            if halfset is not None:
+                log_print(f'{cta_key}进入完整半套模式，CTA只更新记账分量')
+                res = cta_unified_halfset_handle_cta_signal(
+                    exchange, halfset, int(signal), cta_key=cta_key)
+                log_print(f'{cta_key}完整半套协调结果: {res}')
+                return
+            trade_info_for_halfset = cta_usdt_get_trade_info(cta_key)
+            if (trade_info_for_halfset is not None
+                    and trade_info_for_halfset.get('strategy')):
+                symbol_halfset = cta_unified_halfset_get_active(
+                    trade_info_for_halfset['strategy'], hedge_symbol=symbol)
+                if symbol_halfset is not None:
+                    log_print(
+                        f'{cta_key}被完整半套模式接管的{symbol}拦截，避免旧CTA直接下单')
+                    send_wechat(
+                        f'{cta_key}被完整半套模式接管的{symbol}拦截，避免旧CTA直接下单')
+                    return
+
         if signal is None or np.isnan(signal):
             pass
         elif signal == 1 or signal == -1:

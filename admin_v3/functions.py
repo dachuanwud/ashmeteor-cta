@@ -9,8 +9,9 @@ from flask import has_app_context
 from config import debug, amis_edit_origin, local_origin, proxy, sql_uri, wechat_hook_key, auto_add_re
 from factors import *
 import factors
-from model import (CtaUnifiedMarginRebalance, CtaUsdt, CtaUsd,
-                   CtaUsdRebalance, Strategy, LongBlackList, ShortBlackList)
+from model import (CtaUnifiedHalfsetMode, CtaUnifiedMarginRebalance, CtaUsdt,
+                   CtaUsd, CtaUsdRebalance, Strategy, LongBlackList,
+                   ShortBlackList)
 from exts import db
 from binance_account import (ACCOUNT_TYPE_STANDARD, ACCOUNT_TYPE_UNIFIED,
                              make_binance_account_adapter)
@@ -7203,6 +7204,21 @@ def cta_unified_margin_rebalance_run_items(binance_list, items):
                 'msg': '账户不存在',
             })
             continue
+        halfset = cta_unified_halfset_get_active(strategy, asset)
+        if halfset is not None:
+            res = reconcile_unified_halfset_position(
+                exchange,
+                halfset,
+                live_trade_enabled=boolish(
+                    _rebalance_item_value(item, 'live_trade_enabled', 0)))
+            results.append({
+                'strategy': strategy,
+                'asset': asset,
+                'status': res.get('status'),
+                'msg': res.get('msg', ''),
+                'data': res.get('data', {}),
+            })
+            continue
         res = rebalance_unified_margin_asset(
             exchange,
             strategy,
@@ -7248,6 +7264,502 @@ def cta_unified_margin_rebalance_force(exchange, strategy, asset):
     return rebalance_unified_margin_asset(exchange, strategy, item.asset,
                                           item.hedge_ratio, True,
                                           hedge_market=item.hedge_market)
+
+
+def _normalize_halfset_signal(signal):
+    if signal is None:
+        return Decimal('0')
+    try:
+        if pd.isna(signal):
+            return Decimal('0')
+    except Exception:
+        pass
+    value = Decimal(str(int(signal)))
+    if value > 0:
+        return Decimal('1')
+    if value < 0:
+        return Decimal('-1')
+    return Decimal('0')
+
+
+def _clamp_ratio(value):
+    ratio = decimal_or_zero(value)
+    if ratio < 0:
+        return Decimal('0')
+    if ratio > 1:
+        return Decimal('1')
+    return ratio
+
+
+def calculate_unified_halfset_targets(base_qty,
+                                      hedge_ratio,
+                                      signal,
+                                      current_um_position='0',
+                                      cta_sizing_mode='auto_remaining',
+                                      cta_budget_usd='0',
+                                      cta_trade_ratio='1',
+                                      last_price=None):
+    base_qty = decimal_or_zero(base_qty)
+    hedge_ratio = _clamp_ratio(hedge_ratio)
+    signal = _normalize_halfset_signal(signal)
+    current_um_position = decimal_or_zero(current_um_position)
+    cta_trade_ratio = decimal_or_zero(cta_trade_ratio) or Decimal('1')
+    cta_sizing_mode = cta_sizing_mode or 'auto_remaining'
+    warning = ''
+
+    half_target_qty = -base_qty * hedge_ratio
+    if cta_sizing_mode == 'manual_usd':
+        price = decimal_or_zero(last_price)
+        if price <= 0:
+            cta_target_qty = Decimal('0')
+            warning = '价格缺失，无法按手动USDT预算计算CTA目标'
+        else:
+            cta_target_qty = (signal * decimal_or_zero(cta_budget_usd) *
+                              cta_trade_ratio / price)
+    else:
+        cta_sizing_mode = 'auto_remaining'
+        cta_target_qty = signal * base_qty * (Decimal('1') - hedge_ratio)
+
+    total_target_qty = half_target_qty + cta_target_qty
+    order_delta_qty = total_target_qty - current_um_position
+    return {
+        'base_qty': base_qty,
+        'hedge_ratio': hedge_ratio,
+        'signal': signal,
+        'cta_sizing_mode': cta_sizing_mode,
+        'half_target_qty': half_target_qty,
+        'cta_target_qty': cta_target_qty,
+        'total_target_qty': total_target_qty,
+        'current_um_position': current_um_position,
+        'order_delta_qty': order_delta_qty,
+        'warning': warning,
+    }
+
+
+def _halfset_value(item, key, default=None):
+    if isinstance(item, dict):
+        return item.get(key, default)
+    return getattr(item, key, default)
+
+
+def _halfset_to_dict(item):
+    if item is None:
+        return {}
+    if isinstance(item, (str, int, float, Decimal)):
+        return {}
+    if isinstance(item, dict):
+        return dict(item)
+    if hasattr(item, 'to_dict'):
+        return item.to_dict()
+    keys = ('id', 'strategy', 'asset', 'spot_symbol', 'hedge_symbol',
+            'cta_key', 'interval', 'cta', 'period', 'hedge_ratio',
+            'cta_sizing_mode', 'cta_budget_usd', 'cta_trade_ratio',
+            'is_running', 'live_trade_enabled', 'half_target_qty',
+            'cta_target_qty', 'total_target_qty', 'current_um_position',
+            'order_delta_qty', 'last_signal', 'last_signal_time',
+            'last_reconcile_time', 'last_status', 'last_msg')
+    return {key: getattr(item, key, '') for key in keys}
+
+
+def cta_unified_halfset_defaults(data=None):
+    data = data or {}
+    asset = (data.get('asset') or 'ETH').upper()
+    hedge_symbol = (data.get('hedge_symbol') or data.get('symbol')
+                    or f'{asset}USDT').upper()
+    interval = data.get('interval') or '4h'
+    cta = data.get('cta') or 'adapt_bolling_anti_chase'
+    period = factors.format_cta_period(data.get('period') or '[200,20]')
+    cta_key = data.get('cta_key') or f'{hedge_symbol}_{interval}_{cta}_{period}'
+    sizing_mode = data.get('cta_sizing_mode') or 'auto_remaining'
+    if sizing_mode not in ('auto_remaining', 'manual_usd'):
+        sizing_mode = 'auto_remaining'
+    return {
+        'strategy': data.get('strategy') or '',
+        'asset': asset,
+        'spot_symbol': data.get('spot_symbol') or f'{asset}USDT',
+        'hedge_symbol': hedge_symbol,
+        'interval': interval,
+        'cta': cta,
+        'period': period,
+        'cta_key': cta_key,
+        'hedge_ratio': str(data.get('hedge_ratio') or '0.5'),
+        'cta_sizing_mode': sizing_mode,
+        'cta_budget_usd': str(data.get('cta_budget_usd') or '0'),
+        'cta_trade_ratio': str(data.get('cta_trade_ratio')
+                               or data.get('trade_ratio') or '1'),
+        'live_trade_enabled': 1 if boolish(data.get('live_trade_enabled', 0))
+        else 0,
+    }
+
+
+def cta_unified_halfset_get_active(strategy, asset=None, hedge_symbol=None):
+    if not has_app_context() or not strategy:
+        return None
+    query = CtaUnifiedHalfsetMode.query.filter(
+        CtaUnifiedHalfsetMode.strategy == strategy,
+        CtaUnifiedHalfsetMode.is_del == 0,
+        CtaUnifiedHalfsetMode.is_running == 1)
+    if asset:
+        query = query.filter(CtaUnifiedHalfsetMode.asset == asset.upper())
+    if hedge_symbol:
+        query = query.filter(CtaUnifiedHalfsetMode.hedge_symbol ==
+                             hedge_symbol.upper())
+    return query.first()
+
+
+def cta_unified_halfset_get_config(strategy, asset=None, hedge_symbol=None):
+    if not has_app_context() or not strategy:
+        return None
+    query = CtaUnifiedHalfsetMode.query.filter(
+        CtaUnifiedHalfsetMode.strategy == strategy,
+        CtaUnifiedHalfsetMode.is_del == 0)
+    if asset:
+        query = query.filter(CtaUnifiedHalfsetMode.asset == asset.upper())
+    if hedge_symbol:
+        query = query.filter(CtaUnifiedHalfsetMode.hedge_symbol ==
+                             hedge_symbol.upper())
+    return query.first()
+
+
+def cta_unified_halfset_get_active_by_cta_key(cta_key):
+    if not has_app_context() or not cta_key:
+        return None
+    return CtaUnifiedHalfsetMode.query.filter(
+        CtaUnifiedHalfsetMode.cta_key == cta_key,
+        CtaUnifiedHalfsetMode.is_del == 0,
+        CtaUnifiedHalfsetMode.is_running == 1).first()
+
+
+def update_unified_halfset_state(strategy, asset, data):
+    if not has_app_context():
+        return
+    try:
+        item = CtaUnifiedHalfsetMode.query.filter(
+            CtaUnifiedHalfsetMode.strategy == strategy,
+            CtaUnifiedHalfsetMode.asset == (asset or '').upper(),
+            CtaUnifiedHalfsetMode.is_del == 0).first()
+        if item is None:
+            return
+        for key, value in data.items():
+            if hasattr(item, key):
+                setattr(item, key, value)
+        db.session.commit()
+    except Exception as e:
+        log_print(f'{strategy} {asset}完整半套状态写入失败')
+        log_print(e)
+
+
+def _halfset_order_is_reduce_only(current_position, order_delta, target_position):
+    if current_position < 0 and order_delta > 0 and target_position <= 0:
+        return True
+    if current_position > 0 and order_delta < 0 and target_position >= 0:
+        return True
+    return False
+
+
+def reconcile_unified_halfset_position(exchange,
+                                       strategy_or_item,
+                                       asset=None,
+                                       hedge_ratio='0.5',
+                                       cta_signal=None,
+                                       live_trade_enabled=False,
+                                       cta_sizing_mode='auto_remaining',
+                                       cta_budget_usd='0',
+                                       cta_trade_ratio='1',
+                                       last_price=None):
+    item = _halfset_to_dict(strategy_or_item)
+    strategy = item.get('strategy') or strategy_or_item
+    asset = (asset or item.get('asset') or 'ETH').upper()
+    hedge_symbol = (item.get('hedge_symbol') or f'{asset}USDT').upper()
+    hedge_ratio = item.get('hedge_ratio', hedge_ratio)
+    if cta_signal is None:
+        cta_signal = item.get('last_signal', 0)
+    live_trade_enabled = boolish(
+        item.get('live_trade_enabled', live_trade_enabled))
+    cta_sizing_mode = item.get('cta_sizing_mode', cta_sizing_mode)
+    cta_budget_usd = item.get('cta_budget_usd', cta_budget_usd)
+    cta_trade_ratio = item.get('cta_trade_ratio', cta_trade_ratio)
+
+    if exchange is None or not strategy or not asset:
+        return {'status': 500, 'msg': 'params error'}
+
+    account = make_binance_account_adapter(exchange, ACCOUNT_TYPE_UNIFIED)
+    trade_rules = get_um_symbol_trade_rules(exchange, hedge_symbol)
+    if trade_rules is None:
+        msg = f'{hedge_symbol}不支持完整半套模式'
+        update_unified_halfset_state(strategy, asset, {
+            'last_status': 500,
+            'last_msg': msg,
+        })
+        return {'status': 500, 'msg': msg}
+
+    balance = account.get_margin_asset_balance(asset)
+    base_qty = balance['total']
+    current_position = get_um_position_amount(account, hedge_symbol)
+    if last_price is None:
+        try:
+            last_price = fetch_binance_ticker_data(exchange, hedge_symbol)
+        except Exception:
+            last_price = None
+
+    targets = calculate_unified_halfset_targets(
+        base_qty,
+        hedge_ratio,
+        cta_signal,
+        current_position,
+        cta_sizing_mode=cta_sizing_mode,
+        cta_budget_usd=cta_budget_usd,
+        cta_trade_ratio=cta_trade_ratio,
+        last_price=last_price)
+
+    order_delta = targets['order_delta_qty']
+    order_qty = decimal_to_step(abs(order_delta), trade_rules['step_size'])
+    state = {
+        'half_target_qty': targets['half_target_qty'],
+        'cta_target_qty': targets['cta_target_qty'],
+        'total_target_qty': targets['total_target_qty'],
+        'current_um_position': current_position,
+        'order_delta_qty': order_delta,
+        'last_signal': int(targets['signal']),
+        'last_reconcile_time': datetime.now(),
+    }
+
+    data = dict(targets)
+    data.update({
+        'strategy': strategy,
+        'asset': asset,
+        'hedge_symbol': hedge_symbol,
+        'last_price': decimal_or_zero(last_price),
+        'base_wallet_source': 'MARGIN_OR_SPOT',
+    })
+
+    if order_qty < trade_rules['min_qty']:
+        msg = f'{hedge_symbol}完整半套差额{order_qty}小于最小下单量{trade_rules["min_qty"]}'
+        state.update({'last_status': 0, 'last_msg': msg})
+        update_unified_halfset_state(strategy, asset, state)
+        data['order_qty'] = order_qty
+        return {'status': 0, 'msg': msg, 'data': data}
+
+    side = 'SELL' if order_delta < 0 else 'BUY'
+    params = {
+        'symbol': hedge_symbol,
+        'side': side,
+        'type': 'MARKET',
+        'quantity': decimal_to_step_string(order_qty, trade_rules['step_size']),
+    }
+    reduce_only = _halfset_order_is_reduce_only(
+        current_position, order_delta, targets['total_target_qty'])
+    if reduce_only:
+        params['reduceOnly'] = True
+    data['order'] = params
+
+    if not live_trade_enabled:
+        msg = '完整半套协调预览完成，未真实下单'
+        state.update({'last_status': 0, 'last_msg': msg})
+        update_unified_halfset_state(strategy, asset, state)
+        return {'status': 0, 'msg': msg, 'data': data}
+
+    try:
+        log_print(f'{strategy} {asset}完整半套协调器下单参数: {params}')
+        order = robust(func=account.place_um_order,
+                       params=params,
+                       func_name='reconcile_unified_halfset_position')
+        msg = '完整半套协调执行成功'
+        state.update({'last_status': 0, 'last_msg': msg})
+        update_unified_halfset_state(strategy, asset, state)
+        data['order_result'] = order
+        return {'status': 0, 'msg': msg, 'data': data}
+    except Exception as e:
+        msg = f'完整半套协调执行失败: {e}'
+        state.update({'last_status': -1, 'last_msg': msg})
+        update_unified_halfset_state(strategy, asset, state)
+        return {'status': -1, 'msg': msg, 'data': data}
+
+
+def cta_unified_halfset_configure(data, binance_list=None):
+    defaults = cta_unified_halfset_defaults(data)
+    if not defaults['strategy']:
+        return {'status': 500, 'msg': 'strategy不能为空'}
+    if not has_app_context():
+        return {'status': 500, 'msg': '需要在应用上下文中配置完整半套模式'}
+
+    existing_cta = cta_unified_overlay_find_cta(defaults['cta_key'])
+    existing_cta_data = cta_unified_overlay_row_to_dict(existing_cta)
+    if existing_cta_data and existing_cta_data.get(
+            'strategy') != defaults['strategy']:
+        return {
+            'status': 500,
+            'msg': f"{defaults['cta_key']}已属于其他账户{existing_cta_data.get('strategy')}",
+        }
+    if not existing_cta_data:
+        deploy_res = cta_unified_overlay_deploy({
+            'strategy': defaults['strategy'],
+            'asset': defaults['asset'],
+            'symbol': defaults['hedge_symbol'],
+            'interval': defaults['interval'],
+            'cta': defaults['cta'],
+            'period': defaults['period'],
+            'init_value': data.get('init_value') or data.get('cta_budget_usd')
+            or '50',
+            'trade_ratio': defaults['cta_trade_ratio'],
+            'open_tpsl': data.get('open_tpsl', 1),
+            'takeprofit_percentage': data.get('takeprofit_percentage', '0.5'),
+            'takeprofit_drawdown_percentage': data.get(
+                'takeprofit_drawdown_percentage', '0.05'),
+            'stoploss_percentage': data.get('stoploss_percentage', '0.2'),
+        }, binance_list)
+        if deploy_res.get('status') != 0:
+            return deploy_res
+
+    item = CtaUnifiedHalfsetMode.query.filter(
+        CtaUnifiedHalfsetMode.strategy == defaults['strategy'],
+        CtaUnifiedHalfsetMode.asset == defaults['asset'],
+        CtaUnifiedHalfsetMode.is_del == 0).first()
+    if item is None:
+        item = CtaUnifiedHalfsetMode(strategy=defaults['strategy'],
+                                     asset=defaults['asset'])
+        db.session.add(item)
+    for key in ('spot_symbol', 'hedge_symbol', 'cta_key', 'interval', 'cta',
+                'period', 'cta_sizing_mode'):
+        setattr(item, key, defaults[key])
+    item.hedge_ratio = Decimal(defaults['hedge_ratio'])
+    item.cta_budget_usd = Decimal(defaults['cta_budget_usd'])
+    item.cta_trade_ratio = Decimal(defaults['cta_trade_ratio'])
+    item.live_trade_enabled = defaults['live_trade_enabled']
+    item.last_status = 0
+    item.last_msg = '完整半套模式已配置，未自动真实下单'
+    db.session.commit()
+    return {'status': 0, 'msg': item.last_msg, 'data': item.to_dict()}
+
+
+def cta_unified_halfset_start(data):
+    defaults = cta_unified_halfset_defaults(data)
+    if not has_app_context():
+        return {'status': 500, 'msg': '需要在应用上下文中启动完整半套模式'}
+    item = CtaUnifiedHalfsetMode.query.filter(
+        CtaUnifiedHalfsetMode.strategy == defaults['strategy'],
+        CtaUnifiedHalfsetMode.asset == defaults['asset'],
+        CtaUnifiedHalfsetMode.is_del == 0).first()
+    if item is None:
+        res = cta_unified_halfset_configure(data)
+        if res.get('status') != 0:
+            return res
+        item = CtaUnifiedHalfsetMode.query.filter(
+            CtaUnifiedHalfsetMode.strategy == defaults['strategy'],
+            CtaUnifiedHalfsetMode.asset == defaults['asset'],
+            CtaUnifiedHalfsetMode.is_del == 0).first()
+    item.is_running = 1
+    item.live_trade_enabled = defaults['live_trade_enabled']
+    item.last_status = 0
+    item.last_msg = ('完整半套模式已启动，真实下单已开启'
+                     if item.live_trade_enabled == 1
+                     else '完整半套模式已启动，真实下单关闭')
+    db.session.commit()
+    return {'status': 0, 'msg': item.last_msg, 'data': item.to_dict()}
+
+
+def cta_unified_halfset_stop(data):
+    defaults = cta_unified_halfset_defaults(data)
+    if not has_app_context():
+        return {'status': 500, 'msg': '需要在应用上下文中暂停完整半套模式'}
+    item = CtaUnifiedHalfsetMode.query.filter(
+        CtaUnifiedHalfsetMode.strategy == defaults['strategy'],
+        CtaUnifiedHalfsetMode.asset == defaults['asset'],
+        CtaUnifiedHalfsetMode.is_del == 0).first()
+    if item is None:
+        return {'status': 500, 'msg': '完整半套模式未配置'}
+    item.is_running = 0
+    item.last_status = 0
+    item.last_msg = '完整半套模式已暂停，未自动平仓'
+    db.session.commit()
+    return {'status': 0, 'msg': item.last_msg, 'data': item.to_dict()}
+
+
+def cta_unified_halfset_get_summary(binance_list, strategy, asset='ETH'):
+    asset = (asset or 'ETH').upper()
+    item = None
+    if has_app_context() and strategy:
+        item = CtaUnifiedHalfsetMode.query.filter(
+            CtaUnifiedHalfsetMode.strategy == strategy,
+            CtaUnifiedHalfsetMode.asset == asset,
+            CtaUnifiedHalfsetMode.is_del == 0).first()
+    row = cta_unified_halfset_defaults({
+        'strategy': strategy,
+        'asset': asset,
+    })
+    row.update(_halfset_to_dict(item))
+    row['mode_status'] = '已启动' if boolish(row.get('is_running', 0)) else (
+        '已暂停' if item is not None else '未配置')
+
+    exchange = get_exchange(binance_list, strategy)
+    if exchange is not None:
+        preview = reconcile_unified_halfset_position(
+            exchange,
+            row,
+            live_trade_enabled=False)
+        if preview.get('status') == 0:
+            row.update(preview.get('data', {}))
+            row['preview_msg'] = preview.get('msg', '')
+        else:
+            row['preview_msg'] = preview.get('msg', '')
+    if row.get('mode_status') == '未配置':
+        row['next_action_hint'] = '可先配置完整半套模式'
+    elif not boolish(row.get('is_running', 0)):
+        row['next_action_hint'] = '可启动完整半套模式'
+    elif not boolish(row.get('live_trade_enabled', 0)):
+        row['next_action_hint'] = '已启动但真实下单关闭，可先预览协调'
+    else:
+        row['next_action_hint'] = '由协调器合成半套与CTA目标'
+    return {'status': 0, 'msg': '', 'data': {'items': [row], 'total': 1}}
+
+
+def cta_unified_halfset_handle_cta_signal(exchange,
+                                          halfset_item,
+                                          signal,
+                                          cta_key=None,
+                                          last_price=None,
+                                          live_trade_enabled=None):
+    item = _halfset_to_dict(halfset_item)
+    if not item:
+        return {'status': 500, 'msg': '完整半套模式未配置'}
+    if live_trade_enabled is not None:
+        item['live_trade_enabled'] = live_trade_enabled
+    signal = int(_normalize_halfset_signal(signal))
+    res = reconcile_unified_halfset_position(
+        exchange,
+        item,
+        cta_signal=signal,
+        live_trade_enabled=boolish(item.get('live_trade_enabled', 0)),
+        last_price=last_price)
+    if res.get('status') == 0:
+        target_qty = res.get('data', {}).get('cta_target_qty', Decimal('0'))
+        update = {
+            'signal': signal,
+            'signal_time': datetime.now(),
+            'position_amount': target_qty,
+            'is_tpsl': 0,
+        }
+        if last_price is not None:
+            update['open_price'] = last_price
+            update['close_price'] = last_price
+        cta_usdt_update_trade_info(cta_key or item.get('cta_key'), update)
+        update_unified_halfset_state(item.get('strategy'), item.get('asset'), {
+            'last_signal_time': datetime.now(),
+        })
+    return res
+
+
+def cta_unified_halfset_sync_last_signal(exchange, data):
+    defaults = cta_unified_halfset_defaults(data)
+    item = cta_unified_halfset_get_active(defaults['strategy'],
+                                          defaults['asset'])
+    if item is None:
+        return {'status': 500, 'msg': '完整半套模式未启动'}
+    trade_info = cta_usdt_get_trade_info(item.cta_key)
+    if trade_info is None:
+        return {'status': 500, 'msg': 'CTA策略不存在'}
+    return cta_unified_halfset_handle_cta_signal(
+        exchange, item, trade_info.get('signal', 0), cta_key=item.cta_key)
 
 
 def cta_unified_overlay_defaults(data=None):
@@ -8037,6 +8549,23 @@ def cta_usdt_stop_after(exchange,
                         cta_key,
                         account_type=ACCOUNT_TYPE_STANDARD):
     symbol = trade_info['symbol']
+    halfset = cta_unified_halfset_get_active_by_cta_key(cta_key)
+    if halfset is not None:
+        last_price = fetch_binance_ticker_data(exchange, symbol)
+        res = cta_unified_halfset_handle_cta_signal(
+            exchange, halfset, 0, cta_key=cta_key, last_price=last_price)
+        data = {
+            'signal': 0,
+            'signal_time': datetime.now(),
+            'close_price': last_price,
+            'position_amount': 0,
+            'is_running': 0,
+            'is_tpsl': 0,
+        }
+        cta_usdt_update_trade_info(cta_key, data)
+        send_wechat(f'{cta_key}完整半套CTA已停止，协调结果: {res.get("msg", "")}')
+        return
+
     open_price = trade_info['open_price']  # 策略上次开仓价
     init_value = trade_info['init_value']
     net_value = trade_info['net_value']  # 策略当前净值
