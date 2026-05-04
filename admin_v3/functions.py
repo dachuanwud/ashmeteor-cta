@@ -6232,10 +6232,11 @@ def get_account_openorders(exchange, account_type=ACCOUNT_TYPE_STANDARD):
     }
 
 
-def get_dapi_account_openorders(exchange):
+def get_dapi_account_openorders(exchange, account_type=ACCOUNT_TYPE_STANDARD):
     if exchange is None:
         return {'status': 0, 'msg': '', 'data': {'items': []}}
-    openorders = exchange.dapiPrivateGetOpenorders()
+    account = make_binance_account_adapter(exchange, account_type)
+    openorders = account.get_open_orders('cm')
     items = []
     # 过滤掉BUSD合约
     for order in openorders:
@@ -6501,6 +6502,14 @@ def get_um_position_amount(account, hedge_symbol):
     positions = account.get_um_position_risk({'symbol': hedge_symbol})
     for position in positions:
         if position.get('symbol') == hedge_symbol:
+            return Decimal(str(position.get('positionAmt') or '0'))
+    return Decimal('0')
+
+
+def get_cm_position_amount(account, symbol):
+    positions = account.get_cm_position_risk({'symbol': symbol})
+    for position in positions:
+        if position.get('symbol') == symbol:
             return Decimal(str(position.get('positionAmt') or '0'))
     return Decimal('0')
 
@@ -8434,6 +8443,114 @@ def cta_usd_get_all_need_tpsl_cta_keys():
         return None
 
 
+def cta_usd_get_symbol_db_position(symbol, exclude_cta_key=None):
+    query = CtaUsd.query.filter(CtaUsd.symbol == symbol, CtaUsd.is_del == 0)
+    if exclude_cta_key:
+        query = query.filter(CtaUsd.cta_key != exclude_cta_key)
+    position = Decimal('0')
+    for item in query.all():
+        position += decimal_or_zero(item.position_amount)
+    return position
+
+
+def cta_usd_round_contract_amount(value):
+    return Decimal(f'{decimal_or_zero(value):.0f}')
+
+
+def cta_usd_format_contract_amount(value):
+    return format(cta_usd_round_contract_amount(value), 'f')
+
+
+def cta_usd_target_position_from_trade_info(trade_info):
+    signal = int(decimal_or_zero(trade_info.get('signal')))
+    if signal == 0:
+        return Decimal('0')
+    target = (decimal_or_zero(trade_info.get('net_value')) *
+              decimal_or_zero(trade_info.get('trade_ratio')) *
+              Decimal(signal))
+    return cta_usd_round_contract_amount(target)
+
+
+def cta_usd_reconcile_order_amount(exchange,
+                                   symbol,
+                                   cta_key,
+                                   target_position,
+                                   account_type=ACCOUNT_TYPE_STANDARD):
+    account = make_binance_account_adapter(exchange, account_type)
+    actual_position = get_cm_position_amount(account, symbol)
+    other_db_position = cta_usd_get_symbol_db_position(
+        symbol, exclude_cta_key=cta_key)
+    target_total_position = other_db_position + target_position
+    order_amount = cta_usd_round_contract_amount(target_total_position -
+                                                 actual_position)
+    return account, actual_position, other_db_position, target_total_position, order_amount
+
+
+def cta_usd_sync_position_to_signal(exchange,
+                                    cta_key,
+                                    account_type=ACCOUNT_TYPE_STANDARD,
+                                    target_signal=None):
+    trade_info = cta_usd_get_trade_info(cta_key)
+    if trade_info is None:
+        return {'status': 500, 'msg': f'{cta_key} 获取trade_info执行失败'}
+
+    sync_trade_info = dict(trade_info)
+    if target_signal is not None:
+        sync_trade_info['signal'] = int(target_signal)
+
+    symbol = sync_trade_info['symbol']
+    target_position = cta_usd_target_position_from_trade_info(sync_trade_info)
+    account, actual_position, other_db_position, target_total_position, order_amount = (
+        cta_usd_reconcile_order_amount(exchange, symbol, cta_key,
+                                       target_position, account_type))
+
+    price_precision = get_dapi_exchange_info(exchange)
+    last_price = fetch_binance_dapi_ticker_data(exchange, symbol)
+    if cta_usd_open_limit_order(exchange,
+                                symbol,
+                                order_amount,
+                                price_precision,
+                                last_price,
+                                order_func=account.place_cm_order):
+        data = {
+            'signal': int(sync_trade_info['signal']),
+            'signal_time': datetime.now(),
+            'position_amount': target_position,
+            'is_tpsl': 0,
+        }
+        if target_position == 0:
+            data['close_price'] = last_price
+        elif order_amount != 0:
+            data['open_price'] = last_price
+        cta_usd_update_trade_info(cta_key, data)
+        return {
+            'status': 0,
+            'msg': f'{cta_key}目标仓位同步完成',
+            'data': {
+                'target_position':
+                    cta_usd_format_contract_amount(target_position),
+                'actual_position':
+                    cta_usd_format_contract_amount(actual_position),
+                'other_db_position':
+                    cta_usd_format_contract_amount(other_db_position),
+                'target_total_position':
+                    cta_usd_format_contract_amount(target_total_position),
+                'order_amount':
+                    cta_usd_format_contract_amount(order_amount),
+            }
+        }
+
+    return {
+        'status': 500,
+        'msg': f'{cta_key}目标仓位同步下单失败',
+        'data': {
+            'target_position': cta_usd_format_contract_amount(target_position),
+            'actual_position': cta_usd_format_contract_amount(actual_position),
+            'order_amount': cta_usd_format_contract_amount(order_amount),
+        }
+    }
+
+
 def cta_usd_open_limit_order(exchange,
                              symbol,
                              order_amount,
@@ -8610,17 +8727,19 @@ def cta_usd_stop_after(exchange,
     init_value = trade_info['init_value']
     net_value = trade_info['net_value']  # 策略当前净值
     trade_ratio = trade_info['trade_ratio']  # 策略杠杆
-    position_amount = trade_info['position_amount']  # 策略当前持仓
     price_precision = get_dapi_exchange_info(exchange)  # 下单量精度，价格精度
     last_price = fetch_binance_dapi_ticker_data(exchange, symbol)  # 最新价格
-    account = make_binance_account_adapter(exchange, account_type)
     if open_price is not None and open_price != Decimal(0):
         net_value = ((Decimal(last_price) / open_price - 1) *
                      trade_info['signal'] * trade_ratio + 1) * net_value
     target_amount = 0  # 目标下单量
-    order_amount = target_amount - position_amount  # 所需下单量 = 目标下单量 - 当前持仓量
+    account, actual_position, other_db_position, _, order_amount = (
+        cta_usd_reconcile_order_amount(exchange, symbol, cta_key,
+                                       Decimal('0'), account_type))
     target_amount = float(f'{target_amount:.0f}')
     order_amount = float(f'{order_amount:.0f}')
+    log_print(
+        f'{cta_key}停止对账: 实盘总仓={actual_position}, 其他策略仓={other_db_position}')
     log_print(f'标的{symbol}所需下单张数={order_amount}')
     # 下单并更新数据库
     if cta_usd_open_limit_order(exchange, symbol, order_amount,
@@ -8655,17 +8774,19 @@ def cta_usd_tpsl_close_order(exchange,
     init_value = trade_info['init_value']
     net_value = trade_info['net_value']  # 策略当前净值
     trade_ratio = trade_info['trade_ratio']  # 策略杠杆
-    position_amount = trade_info['position_amount']  # 策略当前持仓
     price_precision = get_dapi_exchange_info(exchange)  # 下单量精度，价格精度
     last_price = fetch_binance_dapi_ticker_data(exchange, symbol)  # 最新价格
-    account = make_binance_account_adapter(exchange, account_type)
     if open_price is not None and open_price != Decimal(0):
         net_value = ((Decimal(last_price) / open_price - 1) *
                      trade_info['signal'] * trade_ratio + 1) * net_value
     target_amount = 0  # 目标下单量
-    order_amount = target_amount - position_amount  # 所需下单量 = 目标下单量 - 当前持仓量
+    account, actual_position, other_db_position, _, order_amount = (
+        cta_usd_reconcile_order_amount(exchange, symbol, cta_key,
+                                       Decimal('0'), account_type))
     target_amount = float(f'{target_amount:.0f}')
     order_amount = float(f'{order_amount:.0f}')
+    log_print(
+        f'{cta_key}止盈止损对账: 实盘总仓={actual_position}, 其他策略仓={other_db_position}')
     log_print(f'标的{symbol}所需下单张数={order_amount}')
     # 下单并更新数据库
     if cta_usd_open_limit_order(exchange, symbol, order_amount,

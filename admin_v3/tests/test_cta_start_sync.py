@@ -80,5 +80,49 @@ class CtaUsdStartSyncTest(unittest.TestCase):
         self.assertTrue(add_job.call_args.kwargs["replace_existing"])
 
 
+class CtaUsdExecutePeriodSyncTest(unittest.TestCase):
+    def test_pos_infer_reconciles_position_to_current_signal(self):
+        klines = pd.DataFrame({
+            "candle_begin_time": pd.date_range("2026-01-01", periods=3, freq="4h"),
+            "open": [1, 2, 3],
+            "high": [1, 2, 3],
+            "low": [1, 2, 3],
+            "close": [1, 2, 3],
+            "volume": [1, 1, 1],
+        })
+        signal_df = klines.copy()
+        signal_df["signal"] = [None, None, 1]
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with mock.patch.object(schedule_task.scheduler, "app", _FakeApp()), \
+                    mock.patch.object(schedule_task, "dapi_path", temp_dir), \
+                    mock.patch.object(schedule_task.pd, "read_csv", return_value=klines), \
+                    mock.patch.object(schedule_task, "dapi_get_kline", return_value=klines), \
+                    mock.patch.object(schedule_task.factors, "parse_cta_period",
+                                      return_value=[200, 20]), \
+                    mock.patch.object(schedule_task.factors,
+                                      "adapt_bolling_anti_chase",
+                                      return_value=(signal_df, None)), \
+                    mock.patch.object(schedule_task,
+                                      "cta_usd_sync_position_to_signal",
+                                      return_value={"status": 0}) as sync_position:
+                schedule_task.cta_usd_excute_period(
+                    object(),
+                    "ETHUSD_PERP",
+                    "4h",
+                    "adapt_bolling_anti_chase",
+                    "[200,20]",
+                    "unified",
+                    pos_infer=True,
+                )
+
+        sync_position.assert_called_once_with(
+            mock.ANY,
+            "ETHUSD_PERP_4h_adapt_bolling_anti_chase_[200,20]",
+            "unified",
+            target_signal=1,
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

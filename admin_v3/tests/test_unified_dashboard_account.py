@@ -11,6 +11,7 @@ from functions import (get_account_balance, get_account_margin,
                        get_account_today_orders,
                        get_account_management_balance, get_all_account_balance,
                        get_all_account_positions_list, get_dapi_account_balance,
+                       get_dapi_account_openorders,
                        get_dapi_account_today_orders,
                        calculate_account_profit_ratio,
                        get_account_v2_overview,
@@ -76,6 +77,9 @@ class UnifiedDashboardExchange:
             'commissionAsset': 'ETH',
             'time': '1710000000000',
         }]
+
+    def papiGetCmOpenOrders(self, params=None):
+        return [{'symbol': 'ETHUSD_PERP', 'orderId': '2', 'side': 'BUY'}]
 
     def dapiPublicGetTicker24hr(self):
         return [{'symbol': 'ETHUSD_PERP', 'lastPrice': '3000'}]
@@ -224,6 +228,12 @@ class UnifiedDashboardAccountTest(unittest.TestCase):
     def test_unified_dapi_today_orders_use_papi_adapter(self):
         orders = get_dapi_account_today_orders(self.exchange, 'ETHUSD_PERP',
                                                'unified')
+
+        self.assertEqual(orders['status'], 0)
+        self.assertEqual(orders['data']['items'][0]['symbol'], 'ETHUSD_PERP')
+
+    def test_unified_dapi_open_orders_use_papi_adapter(self):
+        orders = get_dapi_account_openorders(self.exchange, 'unified')
 
         self.assertEqual(orders['status'], 0)
         self.assertEqual(orders['data']['items'][0]['symbol'], 'ETHUSD_PERP')

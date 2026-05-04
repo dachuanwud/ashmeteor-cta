@@ -470,7 +470,7 @@ def cta_excute_period(*args, **kwargs):
 
         # 是否开启信号定期校准, 校准数据库与实盘信号差异
         if pos_infer:
-            df['signal'].fillna(method='ffill', inplace=True)
+            df['signal'] = df['signal'].ffill()
             log_print(f'{cta_key}信号定期校准开始')
 
         signal = df.iloc[-1]['signal']
@@ -1228,11 +1228,22 @@ def cta_usd_excute_period(*args, **kwargs):
 
         # 是否开启信号定期校准, 校准数据库与实盘信号差异
         if pos_infer:
-            df['signal'].fillna(method='ffill', inplace=True)
+            df['signal'] = df['signal'].ffill()
             log_print(f'{cta_key}信号定期校准开始')
 
         signal = df.iloc[-1]['signal']
         log_print(f'{cta_key}本次下单信号为{signal}')
+
+        if pos_infer and signal is not None and not np.isnan(signal):
+            signal = int(signal)
+            res = cta_usd_sync_position_to_signal(exchange,
+                                                  cta_key,
+                                                  account_type,
+                                                  target_signal=signal)
+            log_print(f'{cta_key}信号仓位同步结果: {res}')
+            if res.get('status') != 0:
+                send_wechat(f'{cta_key}信号仓位同步失败: {res.get("msg")}')
+            return
 
         if signal is None or np.isnan(signal):
             pass

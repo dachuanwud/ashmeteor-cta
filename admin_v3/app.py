@@ -830,7 +830,9 @@ def account_openorders():
 def dapi_account_openorders():
     strategy = request.args.get('strategy')
     exchange = get_exchange(binance_list, strategy)
-    res = make_response(jsonify(get_dapi_account_openorders(exchange)))
+    account_type = get_exchange_account_type(binance_list, strategy)
+    res = make_response(jsonify(get_dapi_account_openorders(exchange,
+                                                            account_type)))
     res = decorate_res(res)
     return res
 
@@ -1222,6 +1224,24 @@ def cta_usd_start():
     excutor.submit(cta_usd_excute_init, exchange, symbol, interval, cta,
                    period, account_type, sync_last_signal=sync_last_signal)
     res = make_response(jsonify({'status': 0, 'msg': ''}))
+    res = decorate_res(res)
+    return res
+
+
+@app.route('/cta/usd/sync_position', methods=['GET'])
+def cta_usd_sync_position():
+    cta_key = request.args.get('cta_key')
+    trade_info = cta_usd_get_trade_info(cta_key)
+    if trade_info is None:
+        res = make_response(jsonify({'status': 500, 'msg': '策略不存在'}))
+        res = decorate_res(res)
+        return res
+    exchange = get_exchange(binance_list, trade_info['strategy'])
+    account_type = get_exchange_account_type(binance_list,
+                                             trade_info['strategy'])
+    res = make_response(
+        jsonify(cta_usd_sync_position_to_signal(exchange, cta_key,
+                                                account_type)))
     res = decorate_res(res)
     return res
 

@@ -4123,6 +4123,19 @@
                               },
                               {
                                 "type": "button",
+                                "label": "同步目标仓位",
+                                "actionType": "ajax",
+                                "level": "danger",
+                                "className": "text-danger",
+                                "confirmText": "会按当前信号、策略杠杆、实盘仓位补差额，可能立即下单，确定继续？",
+                                "api": {
+                                  "method": "get",
+                                  "url": "/cta/usd/sync_position?cta_key=${cta_key}"
+                                },
+                                "id": "u:cta_usd_sync_position"
+                              },
+                              {
+                                "type": "button",
                                 "label": "停止策略",
                                 "actionType": "ajax",
                                 "level": "warning",
