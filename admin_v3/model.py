@@ -648,3 +648,81 @@ class CtaUnifiedHalfsetMode(db.Model):
         nullable=False,
         server_default=text("CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"),
         comment='更新时间')
+
+
+class CtaUnifiedHalfsetOverlay(db.Model):
+    __tablename__ = 'cta_unified_halfset_overlay'
+
+    def to_dict(self):
+        return {
+            c.name: getattr(self, c.name, None)
+            for c in self.__table__.columns
+        }
+
+    id = Column(INTEGER, primary_key=True, comment='ID')
+    strategy = Column(VARCHAR(255),
+                      nullable=False,
+                      server_default=text("''"),
+                      comment='统一账户策略名称')
+    asset = Column(VARCHAR(64),
+                   nullable=False,
+                   server_default=text("''"),
+                   comment='现货/杠杆底仓资产')
+    cta_key = Column(VARCHAR(255),
+                     nullable=False,
+                     server_default=text("''"),
+                     comment='CTA策略唯一标识')
+    symbol = Column(VARCHAR(64),
+                    nullable=False,
+                    server_default=text("''"),
+                    comment='U本位CTA标的')
+    interval = Column(VARCHAR(64),
+                      nullable=False,
+                      server_default=text("'4h'"),
+                      comment='CTA周期')
+    cta = Column(VARCHAR(255),
+                 nullable=False,
+                 server_default=text("'adapt_bolling_anti_chase'"),
+                 comment='CTA策略名称')
+    period = Column(VARCHAR(255),
+                    nullable=False,
+                    server_default=text("'[200,20]'"),
+                    comment='CTA参数')
+    weight = Column(DECIMAL(10, 4),
+                    nullable=False,
+                    server_default=text("'1.0000'"),
+                    comment='CTA共享权重')
+    trade_ratio = Column(DECIMAL(10, 4),
+                         nullable=False,
+                         server_default=text("'1.0000'"),
+                         comment='CTA权重增强因子')
+    is_running = Column(TINYINT,
+                        nullable=False,
+                        server_default=text("'0'"),
+                        comment='是否参与完整半套协调')
+    last_signal = Column(INTEGER,
+                         nullable=False,
+                         server_default=text("'0'"),
+                         comment='最近CTA信号')
+    target_qty = Column(DECIMAL(20, 8),
+                        nullable=False,
+                        server_default=text("'0.00000000'"),
+                        comment='CTA记账目标')
+    last_signal_time = Column(DateTime, comment='最近CTA信号时间')
+    last_status = Column(INTEGER,
+                         nullable=False,
+                         server_default=text("'0'"),
+                         comment='最近状态')
+    last_msg = Column(VARCHAR(255),
+                      nullable=False,
+                      server_default=text("''"),
+                      comment='最近提示')
+    is_del = Column(TINYINT,
+                    nullable=False,
+                    server_default=text("'0'"),
+                    comment='是否软删除')
+    update_time = Column(
+        TIMESTAMP,
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"),
+        comment='更新时间')

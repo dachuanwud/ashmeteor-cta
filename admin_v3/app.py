@@ -1195,6 +1195,112 @@ def cta_unified_halfset_sync_last_signal_route():
     return res
 
 
+@app.route('/cta/unified/halfset/overlay/list', methods=['GET'])
+def cta_unified_halfset_overlay_list_route():
+    strategy = request.args.get('strategy')
+    asset = request.args.get('asset', 'ETH')
+    res = make_response(jsonify(
+        cta_unified_halfset_overlay_list(strategy, asset)))
+    res = decorate_res(res)
+    return res
+
+
+@app.route('/cta/unified/halfset/overlay/deploy',
+           methods=['POST', 'OPTIONS'])
+def cta_unified_halfset_overlay_deploy_route():
+    if request.method == 'OPTIONS':
+        res = make_response(jsonify({'status': 0, 'msg': ''}))
+        res = decorate_res(res)
+        return res
+    data = request.get_json(silent=True) or request.form or {}
+    res = make_response(jsonify(
+        cta_unified_halfset_overlay_deploy(data, binance_list)))
+    res = decorate_res(res)
+    return res
+
+
+@app.route('/cta/unified/halfset/overlay/update',
+           methods=['POST', 'OPTIONS'])
+def cta_unified_halfset_overlay_update_route():
+    if request.method == 'OPTIONS':
+        res = make_response(jsonify({'status': 0, 'msg': ''}))
+        res = decorate_res(res)
+        return res
+    data = request.get_json(silent=True) or request.form or {}
+    res = make_response(jsonify(cta_unified_halfset_overlay_update(data)))
+    res = decorate_res(res)
+    return res
+
+
+@app.route('/cta/unified/halfset/overlay/start',
+           methods=['POST', 'OPTIONS'])
+def cta_unified_halfset_overlay_start_route():
+    if request.method == 'OPTIONS':
+        res = make_response(jsonify({'status': 0, 'msg': ''}))
+        res = decorate_res(res)
+        return res
+    data = request.get_json(silent=True) or request.form or {}
+    res_data = cta_unified_halfset_overlay_set_running(data, True)
+    if res_data.get('status') == 0:
+        item = res_data.get('data') or {}
+        exchange = get_exchange(binance_list, item.get('strategy'))
+        account_type = get_exchange_account_type(binance_list,
+                                                 item.get('strategy'))
+        excutor.submit(cta_excute_init, exchange, item.get('symbol'),
+                       item.get('interval'), item.get('cta'),
+                       item.get('period'), account_type)
+    res = make_response(jsonify(res_data))
+    res = decorate_res(res)
+    return res
+
+
+@app.route('/cta/unified/halfset/overlay/stop',
+           methods=['POST', 'OPTIONS'])
+def cta_unified_halfset_overlay_stop_route():
+    if request.method == 'OPTIONS':
+        res = make_response(jsonify({'status': 0, 'msg': ''}))
+        res = decorate_res(res)
+        return res
+    data = request.get_json(silent=True) or request.form or {}
+    cta_key = data.get('cta_key')
+    if cta_key:
+        try:
+            scheduler.remove_job(cta_key)
+        except:
+            pass
+    res_data = cta_unified_halfset_overlay_set_running(data, False)
+    if res_data.get('status') == 0 and cta_key:
+        cta_usdt_update_trade_info(cta_key, {
+            'signal': 0,
+            'signal_time': datetime.now(),
+            'position_amount': 0,
+            'is_running': 0,
+            'is_tpsl': 0,
+        })
+    res = make_response(jsonify(res_data))
+    res = decorate_res(res)
+    return res
+
+
+@app.route('/cta/unified/halfset/overlay/delete',
+           methods=['POST', 'OPTIONS'])
+def cta_unified_halfset_overlay_delete_route():
+    if request.method == 'OPTIONS':
+        res = make_response(jsonify({'status': 0, 'msg': ''}))
+        res = decorate_res(res)
+        return res
+    data = request.get_json(silent=True) or request.form or {}
+    cta_key = data.get('cta_key')
+    if cta_key:
+        try:
+            scheduler.remove_job(cta_key)
+        except:
+            pass
+    res = make_response(jsonify(cta_unified_halfset_overlay_delete(data)))
+    res = decorate_res(res)
+    return res
+
+
 @app.route('/dapi/sell_coin', methods=['GET'])
 def dapi_sell_coin():
     strategy = request.args.get('strategy')

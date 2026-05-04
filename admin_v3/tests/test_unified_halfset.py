@@ -11,7 +11,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 import schedule_task
 from functions import (calculate_unified_halfset_targets,
+                       calculate_unified_halfset_multi_targets,
                        reconcile_unified_halfset_position,
+                       cta_unified_halfset_handle_cta_signal,
                        cta_unified_halfset_sync_last_signal,
                        cta_unified_margin_rebalance_run_items)
 
@@ -121,6 +123,74 @@ class HalfsetTargetCalculationTest(unittest.TestCase):
         self.assertEqual(targets['cta_target_qty'], Decimal('0.2'))
         self.assertEqual(targets['total_target_qty'], Decimal('-0.05'))
 
+    def test_multi_overlay_opposite_signals_cancel_shared_remaining_budget(self):
+        targets = calculate_unified_halfset_multi_targets(
+            Decimal('0.4372623'), '0.5', [{
+                'cta_key': 'long',
+                'is_running': 1,
+                'last_signal': 1,
+                'weight': 1,
+                'trade_ratio': 1,
+            }, {
+                'cta_key': 'short',
+                'is_running': 1,
+                'last_signal': -1,
+                'weight': 1,
+                'trade_ratio': 1,
+            }])
+
+        self.assertEqual(targets['half_target_qty'], Decimal('-0.21863115'))
+        self.assertEqual(targets['cta_target_qty'], Decimal('0E-8'))
+        self.assertEqual(targets['total_target_qty'], Decimal('-0.21863115'))
+        self.assertEqual(targets['overlays'][0]['target_qty'],
+                         Decimal('0.109315575'))
+        self.assertEqual(targets['overlays'][1]['target_qty'],
+                         Decimal('-0.109315575'))
+
+    def test_multi_overlay_weighted_same_direction_keeps_total_budget_capped(self):
+        targets = calculate_unified_halfset_multi_targets(
+            Decimal('0.4372623'), '0.5', [{
+                'cta_key': 'two',
+                'is_running': 1,
+                'last_signal': 1,
+                'weight': 2,
+                'trade_ratio': 1,
+            }, {
+                'cta_key': 'one',
+                'is_running': 1,
+                'last_signal': 1,
+                'weight': 1,
+                'trade_ratio': 1,
+            }])
+
+        self.assertEqual(targets['cta_target_qty'], Decimal('0.218631150'))
+        self.assertEqual(targets['total_target_qty'], Decimal('0E-9'))
+        self.assertEqual(targets['overlays'][0]['target_qty'],
+                         Decimal('0.145754100'))
+        self.assertEqual(targets['overlays'][1]['target_qty'],
+                         Decimal('0.072877050'))
+
+    def test_multi_overlay_stopped_item_does_not_join_weight_pool(self):
+        targets = calculate_unified_halfset_multi_targets(
+            Decimal('0.4372623'), '0.5', [{
+                'cta_key': 'running',
+                'is_running': 1,
+                'last_signal': 1,
+                'weight': 1,
+                'trade_ratio': 1,
+            }, {
+                'cta_key': 'stopped',
+                'is_running': 0,
+                'last_signal': -1,
+                'weight': 100,
+                'trade_ratio': 1,
+            }])
+
+        self.assertEqual(targets['cta_target_qty'], Decimal('0.21863115'))
+        self.assertEqual(targets['overlays'][0]['target_qty'],
+                         Decimal('0.21863115'))
+        self.assertEqual(targets['overlays'][1]['target_qty'], Decimal('0'))
+
 
 class HalfsetReconcileTest(unittest.TestCase):
     def test_preview_builds_single_total_target_order_without_live_order(self):
@@ -181,8 +251,91 @@ class HalfsetReconcileTest(unittest.TestCase):
         self.assertEqual(res['status'], 500)
         self.assertIn('BTCUSDT不支持完整半套模式', res['msg'])
 
+    def test_preview_uses_multiple_overlay_targets_for_single_total_order(self):
+        exchange = HalfsetExchange(position_amt='-0.218')
+
+        res = reconcile_unified_halfset_position(
+            exchange, {
+                'strategy': 'admin_v3_unified',
+                'asset': 'ETH',
+                'hedge_symbol': 'ETHUSDT',
+                'hedge_ratio': Decimal('0.5'),
+                'overlays': [{
+                    'cta_key': 'a',
+                    'is_running': 1,
+                    'last_signal': 1,
+                    'weight': 2,
+                    'trade_ratio': 1,
+                }, {
+                    'cta_key': 'b',
+                    'is_running': 1,
+                    'last_signal': 1,
+                    'weight': 1,
+                    'trade_ratio': 1,
+                }],
+            },
+            live_trade_enabled=False,
+        )
+
+        self.assertEqual(res['status'], 0)
+        data = res['data']
+        self.assertEqual(data['cta_target_qty'], Decimal('0.218631150'))
+        self.assertEqual(data['total_target_qty'], Decimal('0E-9'))
+        self.assertEqual(data['order']['side'], 'BUY')
+        self.assertEqual(data['order']['quantity'], '0.218000')
+        self.assertEqual(exchange.orders, [])
+
 
 class HalfsetExecutionIsolationTest(unittest.TestCase):
+    def test_cta_signal_updates_one_overlay_and_reconciles_all_overlays(self):
+        halfset = {
+            'strategy': 'admin_v3_unified',
+            'asset': 'ETH',
+            'hedge_ratio': Decimal('0.5'),
+            'live_trade_enabled': 0,
+            'overlays': [{
+                'cta_key': 'ETHUSDT_4h_adapt_bolling_anti_chase_[200,20]',
+                'is_running': 1,
+                'last_signal': 0,
+                'weight': 1,
+                'trade_ratio': 1,
+            }, {
+                'cta_key': 'ETHUSDT_4h_simple_turtle_20',
+                'is_running': 1,
+                'last_signal': -1,
+                'weight': 1,
+                'trade_ratio': 1,
+            }],
+        }
+
+        with mock.patch('functions.reconcile_unified_halfset_position',
+                        return_value={'status': 0,
+                                      'data': {
+                                          'overlays': [{
+                                              'cta_key': halfset['overlays'][0]['cta_key'],
+                                              'target_qty': Decimal('0.1'),
+                                          }, {
+                                              'cta_key': halfset['overlays'][1]['cta_key'],
+                                              'target_qty': Decimal('-0.1'),
+                                          }]
+                                      }}) as reconcile, \
+                mock.patch('functions.cta_usdt_update_trade_info') as update, \
+                mock.patch('functions.update_unified_halfset_state'):
+            res = cta_unified_halfset_handle_cta_signal(
+                object(),
+                halfset,
+                1,
+                cta_key=halfset['overlays'][0]['cta_key'])
+
+        self.assertEqual(res['status'], 0)
+        reconcile.assert_called_once()
+        sent_overlays = reconcile.call_args.args[1]['overlays']
+        self.assertEqual(sent_overlays[0]['last_signal'], 1)
+        self.assertEqual(sent_overlays[1]['last_signal'], -1)
+        update.assert_called_once()
+        self.assertEqual(update.call_args.args[1]['position_amount'],
+                         Decimal('0.1'))
+
     def test_sync_last_signal_recomputes_last_effective_signal_from_klines(self):
         klines = pd.DataFrame({
             'candle_begin_time': pd.date_range('2026-01-01',
@@ -231,8 +384,11 @@ class HalfsetExecutionIsolationTest(unittest.TestCase):
                            return_value=[200, 20]), \
                 mock.patch('functions.factors.adapt_bolling_anti_chase',
                            return_value=(signal_df, None)), \
-                mock.patch('functions.cta_unified_halfset_handle_cta_signal',
-                           return_value={'status': 0}) as handle:
+                mock.patch('functions.reconcile_unified_halfset_position',
+                           return_value={'status': 0,
+                                         'data': {'overlays': []}}) as reconcile, \
+                mock.patch('functions.cta_usdt_update_trade_info'), \
+                mock.patch('functions.update_unified_halfset_overlay_state'):
             res = cta_unified_halfset_sync_last_signal(
                 object(), {
                     'strategy': 'admin_v3_unified',
@@ -240,8 +396,8 @@ class HalfsetExecutionIsolationTest(unittest.TestCase):
                 })
 
         self.assertEqual(res['status'], 0)
-        handle.assert_called_once()
-        self.assertEqual(handle.call_args.args[2], 1)
+        reconcile.assert_called_once()
+        self.assertEqual(reconcile.call_args.args[1]['overlays'][0]['last_signal'], 1)
 
     def test_cta_period_delegates_to_halfset_coordinator_without_direct_cta_order(self):
         klines = pd.DataFrame({

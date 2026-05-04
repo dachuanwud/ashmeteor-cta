@@ -40,6 +40,11 @@
                           "actionType": "reload"
                         },
                         {
+                          "componentId": "u:unified_halfset_overlays",
+                          "args": {},
+                          "actionType": "reload"
+                        },
+                        {
                           "componentId": "u:account_topology_summary",
                           "args": {},
                           "actionType": "reload"
@@ -94,6 +99,11 @@
                         },
                         {
                           "componentId": "u:unified_halfset_mode",
+                          "args": {},
+                          "actionType": "reload"
+                        },
+                        {
+                          "componentId": "u:unified_halfset_overlays",
                           "args": {},
                           "actionType": "reload"
                         },
@@ -755,6 +765,317 @@
                             "strategy": "${strategy}",
                             "asset": "${asset}",
                             "live_trade_enabled": "${live_trade_enabled}"
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "type": "crud",
+                    "id": "u:unified_halfset_overlays",
+                    "title": "完整半套 CTA Overlay 列表",
+                    "syncLocation": false,
+                    "api": {
+                      "method": "get",
+                      "url": "/cta/unified/halfset/overlay/list?strategy=${strategy}&asset=ETH"
+                    },
+                    "mode": "table",
+                    "columns": [
+                      {
+                        "name": "cta_key",
+                        "label": "CTA Key",
+                        "type": "text"
+                      },
+                      {
+                        "name": "symbol",
+                        "label": "标的",
+                        "type": "text"
+                      },
+                      {
+                        "name": "cta",
+                        "label": "策略",
+                        "type": "text"
+                      },
+                      {
+                        "name": "period",
+                        "label": "参数",
+                        "type": "text"
+                      },
+                      {
+                        "name": "weight",
+                        "label": "共享权重",
+                        "type": "text"
+                      },
+                      {
+                        "name": "trade_ratio",
+                        "label": "CTA策略杠杆",
+                        "type": "text"
+                      },
+                      {
+                        "name": "is_running",
+                        "label": "参与协调",
+                        "type": "text"
+                      },
+                      {
+                        "name": "last_signal",
+                        "label": "最近信号",
+                        "type": "text"
+                      },
+                      {
+                        "name": "target_qty",
+                        "label": "CTA记账目标",
+                        "type": "text"
+                      },
+                      {
+                        "name": "last_msg",
+                        "label": "最近提示",
+                        "type": "text"
+                      }
+                    ],
+                    "bulkActions": [],
+                    "headerToolbar": [
+                      {
+                        "type": "button",
+                        "label": "部署 CTA overlay",
+                        "level": "primary",
+                        "actionType": "dialog",
+                        "dialog": {
+                          "type": "dialog",
+                          "title": "部署 CTA overlay",
+                          "body": [
+                            {
+                              "type": "form",
+                              "title": "添加一个参与完整半套协调的CTA记账分量",
+                              "body": [
+                                {
+                                  "type": "static",
+                                  "name": "strategy",
+                                  "label": "账户",
+                                  "value": "${strategy}"
+                                },
+                                {
+                                  "type": "input-text",
+                                  "name": "asset",
+                                  "label": "底仓资产",
+                                  "value": "ETH"
+                                },
+                                {
+                                  "type": "input-text",
+                                  "name": "symbol",
+                                  "label": "U本位标的",
+                                  "value": "ETHUSDT"
+                                },
+                                {
+                                  "type": "select",
+                                  "name": "interval",
+                                  "label": "时间周期",
+                                  "value": "4h",
+                                  "options": [
+                                    {
+                                      "label": "1h",
+                                      "value": "1h"
+                                    },
+                                    {
+                                      "label": "4h",
+                                      "value": "4h"
+                                    },
+                                    {
+                                      "label": "1d",
+                                      "value": "1d"
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "select",
+                                  "name": "cta",
+                                  "label": "CTA策略",
+                                  "value": "adapt_bolling_anti_chase",
+                                  "options": [
+                                    {
+                                      "label": "自适应布林防追高追空",
+                                      "value": "adapt_bolling_anti_chase"
+                                    },
+                                    {
+                                      "label": "自适应布林",
+                                      "value": "adapt_bolling"
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "input-text",
+                                  "name": "period",
+                                  "label": "CTA参数",
+                                  "value": "[200,20]"
+                                },
+                                {
+                                  "type": "input-number",
+                                  "name": "weight",
+                                  "label": "共享权重",
+                                  "value": 1,
+                                  "min": 0,
+                                  "step": 0.1
+                                },
+                                {
+                                  "type": "input-number",
+                                  "name": "trade_ratio",
+                                  "label": "CTA策略杠杆 trade_ratio",
+                                  "value": 1,
+                                  "min": 0,
+                                  "step": 0.1
+                                },
+                                {
+                                  "type": "input-number",
+                                  "name": "init_value",
+                                  "label": "CTA初始投入USDT",
+                                  "value": 50,
+                                  "min": 0,
+                                  "step": 1
+                                }
+                              ],
+                              "api": {
+                                "method": "post",
+                                "url": "/cta/unified/halfset/overlay/deploy",
+                                "data": {
+                                  "strategy": "${strategy}",
+                                  "asset": "${asset}",
+                                  "symbol": "${symbol}",
+                                  "interval": "${interval}",
+                                  "cta": "${cta}",
+                                  "period": "${period}",
+                                  "weight": "${weight}",
+                                  "trade_ratio": "${trade_ratio}",
+                                  "init_value": "${init_value}"
+                                }
+                              }
+                            }
+                          ],
+                          "showCloseButton": true,
+                          "showErrorMsg": true
+                        }
+                      },
+                      {
+                        "type": "reload",
+                        "label": "",
+                        "align": "right",
+                        "icon": "iconfont icon-refresh",
+                        "tooltip": "刷新"
+                      }
+                    ],
+                    "itemActions": [
+                      {
+                        "type": "button",
+                        "label": "启动",
+                        "level": "success",
+                        "confirmText": "确定让这个CTA overlay参与完整半套协调？",
+                        "actionType": "ajax",
+                        "api": {
+                          "method": "post",
+                          "url": "/cta/unified/halfset/overlay/start",
+                          "data": {
+                            "strategy": "${strategy}",
+                            "asset": "${asset}",
+                            "cta_key": "${cta_key}"
+                          }
+                        }
+                      },
+                      {
+                        "type": "button",
+                        "label": "停止",
+                        "level": "warning",
+                        "confirmText": "确定停止这个CTA overlay？不会自动平仓。",
+                        "actionType": "ajax",
+                        "api": {
+                          "method": "post",
+                          "url": "/cta/unified/halfset/overlay/stop",
+                          "data": {
+                            "strategy": "${strategy}",
+                            "asset": "${asset}",
+                            "cta_key": "${cta_key}"
+                          }
+                        }
+                      },
+                      {
+                        "type": "button",
+                        "label": "同步信号",
+                        "level": "info",
+                        "confirmText": "确定重算这个CTA上一有效信号并触发协调器？",
+                        "actionType": "ajax",
+                        "api": {
+                          "method": "post",
+                          "url": "/cta/unified/halfset/sync_last_signal",
+                          "data": {
+                            "strategy": "${strategy}",
+                            "asset": "${asset}",
+                            "cta_key": "${cta_key}"
+                          }
+                        }
+                      },
+                      {
+                        "type": "button",
+                        "label": "调整",
+                        "level": "info",
+                        "actionType": "dialog",
+                        "dialog": {
+                          "type": "dialog",
+                          "title": "调整 CTA overlay",
+                          "body": [
+                            {
+                              "type": "form",
+                              "title": "只调整权重和策略杠杆，不直接下单",
+                              "body": [
+                                {
+                                  "type": "static",
+                                  "name": "cta_key",
+                                  "label": "CTA Key",
+                                  "value": "${cta_key}"
+                                },
+                                {
+                                  "type": "input-number",
+                                  "name": "weight",
+                                  "label": "共享权重",
+                                  "value": "${weight}",
+                                  "min": 0,
+                                  "step": 0.1
+                                },
+                                {
+                                  "type": "input-number",
+                                  "name": "trade_ratio",
+                                  "label": "CTA策略杠杆 trade_ratio",
+                                  "value": "${trade_ratio}",
+                                  "min": 0,
+                                  "step": 0.1
+                                }
+                              ],
+                              "api": {
+                                "method": "post",
+                                "url": "/cta/unified/halfset/overlay/update",
+                                "data": {
+                                  "strategy": "${strategy}",
+                                  "asset": "${asset}",
+                                  "cta_key": "${cta_key}",
+                                  "weight": "${weight}",
+                                  "trade_ratio": "${trade_ratio}"
+                                }
+                              }
+                            }
+                          ],
+                          "showCloseButton": true,
+                          "showErrorMsg": true
+                        }
+                      },
+                      {
+                        "type": "button",
+                        "label": "删除",
+                        "level": "danger",
+                        "confirmText": "确定删除这个CTA overlay？不会自动平仓。",
+                        "actionType": "ajax",
+                        "api": {
+                          "method": "post",
+                          "url": "/cta/unified/halfset/overlay/delete",
+                          "data": {
+                            "strategy": "${strategy}",
+                            "asset": "${asset}",
+                            "cta_key": "${cta_key}"
                           }
                         }
                       }

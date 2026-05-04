@@ -9,9 +9,9 @@ from flask import has_app_context
 from config import debug, amis_edit_origin, local_origin, proxy, sql_uri, wechat_hook_key, auto_add_re
 from factors import *
 import factors
-from model import (CtaUnifiedHalfsetMode, CtaUnifiedMarginRebalance, CtaUsdt,
-                   CtaUsd, CtaUsdRebalance, Strategy, LongBlackList,
-                   ShortBlackList)
+from model import (CtaUnifiedHalfsetMode, CtaUnifiedHalfsetOverlay,
+                   CtaUnifiedMarginRebalance, CtaUsdt, CtaUsd,
+                   CtaUsdRebalance, Strategy, LongBlackList, ShortBlackList)
 from exts import db
 from binance_account import (ACCOUNT_TYPE_STANDARD, ACCOUNT_TYPE_UNIFIED,
                              make_binance_account_adapter)
@@ -7336,6 +7336,60 @@ def calculate_unified_halfset_targets(base_qty,
     }
 
 
+def calculate_unified_halfset_multi_targets(base_qty,
+                                            hedge_ratio,
+                                            overlays,
+                                            current_um_position='0'):
+    base_qty = decimal_or_zero(base_qty)
+    hedge_ratio = _clamp_ratio(hedge_ratio)
+    current_um_position = decimal_or_zero(current_um_position)
+    half_target_qty = -base_qty * hedge_ratio
+    cta_budget_qty = base_qty * (Decimal('1') - hedge_ratio)
+
+    overlay_rows = []
+    total_weight = Decimal('0')
+    for overlay in overlays or []:
+        row = _overlay_to_dict(overlay)
+        is_running = boolish(row.get('is_running', 0))
+        weight = max(decimal_or_zero(row.get('weight', 1)), Decimal('0'))
+        trade_ratio = max(decimal_or_zero(row.get('trade_ratio', 1)),
+                          Decimal('0'))
+        effective_weight = weight * trade_ratio if is_running else Decimal('0')
+        total_weight += effective_weight
+        row.update({
+            'is_running': 1 if is_running else 0,
+            'last_signal': int(_normalize_halfset_signal(
+                row.get('last_signal', row.get('signal', 0)))),
+            'weight': weight,
+            'trade_ratio': trade_ratio,
+            'effective_weight': effective_weight,
+        })
+        overlay_rows.append(row)
+
+    cta_target_qty = Decimal('0')
+    for row in overlay_rows:
+        if total_weight > 0 and row['effective_weight'] > 0:
+            target_qty = (Decimal(row['last_signal']) * cta_budget_qty *
+                          row['effective_weight'] / total_weight)
+        else:
+            target_qty = Decimal('0')
+        row['target_qty'] = target_qty
+        cta_target_qty += target_qty
+
+    total_target_qty = half_target_qty + cta_target_qty
+    return {
+        'base_qty': base_qty,
+        'hedge_ratio': hedge_ratio,
+        'half_target_qty': half_target_qty,
+        'cta_target_qty': cta_target_qty,
+        'total_target_qty': total_target_qty,
+        'current_um_position': current_um_position,
+        'order_delta_qty': total_target_qty - current_um_position,
+        'overlays': overlay_rows,
+        'warning': '',
+    }
+
+
 def _halfset_value(item, key, default=None):
     if isinstance(item, dict):
         return item.get(key, default)
@@ -7392,6 +7446,45 @@ def cta_unified_halfset_defaults(data=None):
     }
 
 
+def _overlay_to_dict(item):
+    if item is None:
+        return {}
+    if isinstance(item, dict):
+        return dict(item)
+    if hasattr(item, 'to_dict'):
+        return item.to_dict()
+    keys = ('id', 'strategy', 'asset', 'cta_key', 'symbol', 'interval', 'cta',
+            'period', 'weight', 'trade_ratio', 'is_running', 'last_signal',
+            'target_qty', 'last_signal_time', 'last_status', 'last_msg')
+    return {key: getattr(item, key, '') for key in keys}
+
+
+def cta_unified_halfset_overlay_defaults(data=None):
+    data = data or {}
+    asset = (data.get('asset') or 'ETH').upper()
+    symbol = (data.get('symbol') or data.get('hedge_symbol')
+              or f'{asset}USDT').upper()
+    interval = data.get('interval') or '4h'
+    cta = data.get('cta') or 'adapt_bolling_anti_chase'
+    period = factors.format_cta_period(data.get('period') or '[200,20]')
+    cta_key = data.get('cta_key') or f'{symbol}_{interval}_{cta}_{period}'
+    return {
+        'strategy': data.get('strategy') or '',
+        'asset': asset,
+        'cta_key': cta_key,
+        'symbol': symbol,
+        'interval': interval,
+        'cta': cta,
+        'period': period,
+        'weight': str(data.get('weight') or '1'),
+        'trade_ratio': str(data.get('trade_ratio')
+                           or data.get('cta_trade_ratio') or '1'),
+        'is_running': 1 if boolish(data.get('is_running', 0)) else 0,
+        'last_signal': int(_normalize_halfset_signal(
+            data.get('last_signal', data.get('signal', 0)))),
+    }
+
+
 def cta_unified_halfset_get_active(strategy, asset=None, hedge_symbol=None):
     if not has_app_context() or not strategy:
         return None
@@ -7421,13 +7514,74 @@ def cta_unified_halfset_get_config(strategy, asset=None, hedge_symbol=None):
     return query.first()
 
 
+def cta_unified_halfset_get_overlay_dicts(strategy,
+                                          asset=None,
+                                          running_only=False,
+                                          cta_key=None):
+    if not has_app_context() or not strategy:
+        return []
+    query = CtaUnifiedHalfsetOverlay.query.filter(
+        CtaUnifiedHalfsetOverlay.strategy == strategy,
+        CtaUnifiedHalfsetOverlay.is_del == 0)
+    if asset:
+        query = query.filter(CtaUnifiedHalfsetOverlay.asset == asset.upper())
+    if cta_key:
+        query = query.filter(CtaUnifiedHalfsetOverlay.cta_key == cta_key)
+    if running_only:
+        query = query.filter(CtaUnifiedHalfsetOverlay.is_running == 1)
+    return [_overlay_to_dict(item) for item in query.order_by(
+        CtaUnifiedHalfsetOverlay.id).all()]
+
+
+def cta_unified_halfset_get_overlay(cta_key):
+    if not has_app_context() or not cta_key:
+        return None
+    return CtaUnifiedHalfsetOverlay.query.filter(
+        CtaUnifiedHalfsetOverlay.cta_key == cta_key,
+        CtaUnifiedHalfsetOverlay.is_del == 0).first()
+
+
+def cta_unified_halfset_attach_overlays(item, overlays=None):
+    item_data = _halfset_to_dict(item)
+    if not item_data:
+        return {}
+    if overlays is None:
+        overlays = cta_unified_halfset_get_overlay_dicts(
+            item_data.get('strategy'), item_data.get('asset'))
+    if not overlays and item_data.get('cta_key'):
+        overlays = [{
+            'strategy': item_data.get('strategy'),
+            'asset': item_data.get('asset'),
+            'cta_key': item_data.get('cta_key'),
+            'symbol': item_data.get('hedge_symbol'),
+            'interval': item_data.get('interval'),
+            'cta': item_data.get('cta'),
+            'period': item_data.get('period'),
+            'weight': Decimal('1'),
+            'trade_ratio': item_data.get('cta_trade_ratio', Decimal('1')),
+            'is_running': item_data.get('is_running', 1),
+            'last_signal': item_data.get('last_signal', 0),
+            'target_qty': item_data.get('cta_target_qty', Decimal('0')),
+        }]
+    item_data['overlays'] = overlays or []
+    return item_data
+
+
 def cta_unified_halfset_get_active_by_cta_key(cta_key):
     if not has_app_context() or not cta_key:
         return None
-    return CtaUnifiedHalfsetMode.query.filter(
+    overlay = cta_unified_halfset_get_overlay(cta_key)
+    if overlay is not None and overlay.is_running == 1:
+        halfset = cta_unified_halfset_get_active(overlay.strategy,
+                                                 overlay.asset)
+        return cta_unified_halfset_attach_overlays(halfset)
+    if overlay is not None:
+        return None
+    halfset = CtaUnifiedHalfsetMode.query.filter(
         CtaUnifiedHalfsetMode.cta_key == cta_key,
         CtaUnifiedHalfsetMode.is_del == 0,
         CtaUnifiedHalfsetMode.is_running == 1).first()
+    return cta_unified_halfset_attach_overlays(halfset)
 
 
 def update_unified_halfset_state(strategy, asset, data):
@@ -7446,6 +7600,24 @@ def update_unified_halfset_state(strategy, asset, data):
         db.session.commit()
     except Exception as e:
         log_print(f'{strategy} {asset}完整半套状态写入失败')
+        log_print(e)
+
+
+def update_unified_halfset_overlay_state(cta_key, data):
+    if not has_app_context() or not cta_key:
+        return
+    try:
+        item = CtaUnifiedHalfsetOverlay.query.filter(
+            CtaUnifiedHalfsetOverlay.cta_key == cta_key,
+            CtaUnifiedHalfsetOverlay.is_del == 0).first()
+        if item is None:
+            return
+        for key, value in data.items():
+            if hasattr(item, key):
+                setattr(item, key, value)
+        db.session.commit()
+    except Exception as e:
+        log_print(f'{cta_key}完整半套overlay状态写入失败')
         log_print(e)
 
 
@@ -7479,6 +7651,9 @@ def reconcile_unified_halfset_position(exchange,
     cta_sizing_mode = item.get('cta_sizing_mode', cta_sizing_mode)
     cta_budget_usd = item.get('cta_budget_usd', cta_budget_usd)
     cta_trade_ratio = item.get('cta_trade_ratio', cta_trade_ratio)
+    overlays = item.get('overlays')
+    if overlays is None and has_app_context() and strategy and asset:
+        overlays = cta_unified_halfset_get_overlay_dicts(strategy, asset)
 
     if exchange is None or not strategy or not asset:
         return {'status': 500, 'msg': 'params error'}
@@ -7502,15 +7677,22 @@ def reconcile_unified_halfset_position(exchange,
         except Exception:
             last_price = None
 
-    targets = calculate_unified_halfset_targets(
-        base_qty,
-        hedge_ratio,
-        cta_signal,
-        current_position,
-        cta_sizing_mode=cta_sizing_mode,
-        cta_budget_usd=cta_budget_usd,
-        cta_trade_ratio=cta_trade_ratio,
-        last_price=last_price)
+    if overlays:
+        targets = calculate_unified_halfset_multi_targets(
+            base_qty,
+            hedge_ratio,
+            overlays,
+            current_position)
+    else:
+        targets = calculate_unified_halfset_targets(
+            base_qty,
+            hedge_ratio,
+            cta_signal,
+            current_position,
+            cta_sizing_mode=cta_sizing_mode,
+            cta_budget_usd=cta_budget_usd,
+            cta_trade_ratio=cta_trade_ratio,
+            last_price=last_price)
 
     order_delta = targets['order_delta_qty']
     order_qty = decimal_to_step(abs(order_delta), trade_rules['step_size'])
@@ -7520,7 +7702,7 @@ def reconcile_unified_halfset_position(exchange,
         'total_target_qty': targets['total_target_qty'],
         'current_um_position': current_position,
         'order_delta_qty': order_delta,
-        'last_signal': int(targets['signal']),
+        'last_signal': int(targets.get('signal', 0)),
         'last_reconcile_time': datetime.now(),
     }
 
@@ -7532,11 +7714,20 @@ def reconcile_unified_halfset_position(exchange,
         'last_price': decimal_or_zero(last_price),
         'base_wallet_source': 'MARGIN_OR_SPOT',
     })
+    if targets.get('overlays'):
+        data['overlays'] = targets['overlays']
 
     if order_qty < trade_rules['min_qty']:
         msg = f'{hedge_symbol}完整半套差额{order_qty}小于最小下单量{trade_rules["min_qty"]}'
         state.update({'last_status': 0, 'last_msg': msg})
         update_unified_halfset_state(strategy, asset, state)
+        for overlay in targets.get('overlays', []):
+            update_unified_halfset_overlay_state(overlay.get('cta_key'), {
+                'last_signal': overlay.get('last_signal', 0),
+                'target_qty': overlay.get('target_qty', Decimal('0')),
+                'last_status': 0,
+                'last_msg': msg,
+            })
         data['order_qty'] = order_qty
         return {'status': 0, 'msg': msg, 'data': data}
 
@@ -7557,6 +7748,13 @@ def reconcile_unified_halfset_position(exchange,
         msg = '完整半套协调预览完成，未真实下单'
         state.update({'last_status': 0, 'last_msg': msg})
         update_unified_halfset_state(strategy, asset, state)
+        for overlay in targets.get('overlays', []):
+            update_unified_halfset_overlay_state(overlay.get('cta_key'), {
+                'last_signal': overlay.get('last_signal', 0),
+                'target_qty': overlay.get('target_qty', Decimal('0')),
+                'last_status': 0,
+                'last_msg': msg,
+            })
         return {'status': 0, 'msg': msg, 'data': data}
 
     try:
@@ -7567,6 +7765,13 @@ def reconcile_unified_halfset_position(exchange,
         msg = '完整半套协调执行成功'
         state.update({'last_status': 0, 'last_msg': msg})
         update_unified_halfset_state(strategy, asset, state)
+        for overlay in targets.get('overlays', []):
+            update_unified_halfset_overlay_state(overlay.get('cta_key'), {
+                'last_signal': overlay.get('last_signal', 0),
+                'target_qty': overlay.get('target_qty', Decimal('0')),
+                'last_status': 0,
+                'last_msg': msg,
+            })
         data['order_result'] = order
         return {'status': 0, 'msg': msg, 'data': data}
     except Exception as e:
@@ -7726,6 +7931,15 @@ def cta_unified_halfset_handle_cta_signal(exchange,
     if live_trade_enabled is not None:
         item['live_trade_enabled'] = live_trade_enabled
     signal = int(_normalize_halfset_signal(signal))
+    overlays = item.get('overlays') or []
+    if overlays and cta_key:
+        updated_overlays = []
+        for overlay in overlays:
+            overlay_data = _overlay_to_dict(overlay)
+            if overlay_data.get('cta_key') == cta_key:
+                overlay_data['last_signal'] = signal
+            updated_overlays.append(overlay_data)
+        item['overlays'] = updated_overlays
     res = reconcile_unified_halfset_position(
         exchange,
         item,
@@ -7734,6 +7948,10 @@ def cta_unified_halfset_handle_cta_signal(exchange,
         last_price=last_price)
     if res.get('status') == 0:
         target_qty = res.get('data', {}).get('cta_target_qty', Decimal('0'))
+        for overlay in res.get('data', {}).get('overlays', []):
+            if overlay.get('cta_key') == (cta_key or item.get('cta_key')):
+                target_qty = overlay.get('target_qty', Decimal('0'))
+                break
         write_time = signal_time or datetime.now()
         update = {
             'signal': signal,
@@ -7745,6 +7963,13 @@ def cta_unified_halfset_handle_cta_signal(exchange,
             update['open_price'] = last_price
             update['close_price'] = last_price
         cta_usdt_update_trade_info(cta_key or item.get('cta_key'), update)
+        update_unified_halfset_overlay_state(cta_key or item.get('cta_key'), {
+            'last_signal': signal,
+            'last_signal_time': write_time,
+            'target_qty': target_qty,
+            'last_status': res.get('status', 0),
+            'last_msg': res.get('msg', ''),
+        })
         update_unified_halfset_state(item.get('strategy'), item.get('asset'), {
             'last_signal_time': write_time,
         })
@@ -7757,8 +7982,9 @@ def cta_unified_halfset_get_last_effective_signal(exchange, item, trade_info):
     symbol = item_data.get('hedge_symbol') or trade_info.get(
         'symbol') or f'{asset}USDT'
     interval = item_data.get('interval') or trade_info.get('interval') or '4h'
-    cta = item_data.get('cta') or 'adapt_bolling_anti_chase'
-    period = item_data.get('period') or '[200,20]'
+    cta = trade_info.get('cta') or item_data.get(
+        'cta') or 'adapt_bolling_anti_chase'
+    period = trade_info.get('period') or item_data.get('period') or '[200,20]'
 
     symbol_data = get_kline(exchange, symbol, interval, 10000)
     df, *_ = getattr(factors, cta)(symbol_data.copy(),
@@ -7788,17 +8014,179 @@ def cta_unified_halfset_sync_last_signal(exchange, data):
                                           defaults['asset'])
     if item is None:
         return {'status': 500, 'msg': '完整半套模式未启动'}
-    trade_info = cta_usdt_get_trade_info(item.cta_key)
+    item_data = cta_unified_halfset_attach_overlays(item)
+    cta_key = data.get('cta_key') or item_data.get('cta_key')
+    if not data.get('cta_key') and item_data.get('overlays'):
+        selected_keys = {
+            overlay.get('cta_key')
+            for overlay in item_data['overlays'] if boolish(
+                overlay.get('is_running', 0))
+        }
+        signal_times = {}
+        updated_overlays = []
+        for overlay in item_data['overlays']:
+            overlay_data = _overlay_to_dict(overlay)
+            if overlay_data.get('cta_key') in selected_keys:
+                trade_info = cta_usdt_get_trade_info(overlay_data['cta_key'])
+                if trade_info is None:
+                    continue
+                signal, signal_time = cta_unified_halfset_get_last_effective_signal(
+                    exchange, overlay_data, trade_info)
+                overlay_data['last_signal'] = signal
+                signal_times[overlay_data['cta_key']] = signal_time
+            updated_overlays.append(overlay_data)
+        if not signal_times:
+            return {'status': 500, 'msg': '没有可同步的CTA overlay'}
+        item_data['overlays'] = updated_overlays
+        res = reconcile_unified_halfset_position(
+            exchange,
+            item_data,
+            live_trade_enabled=boolish(item_data.get('live_trade_enabled', 0)))
+        if res.get('status') == 0:
+            target_by_key = {
+                overlay.get('cta_key'): overlay.get('target_qty', Decimal('0'))
+                for overlay in res.get('data', {}).get('overlays', [])
+            }
+            for overlay in updated_overlays:
+                key = overlay.get('cta_key')
+                if key not in signal_times:
+                    continue
+                write_time = signal_times[key] or datetime.now()
+                target_qty = target_by_key.get(key, Decimal('0'))
+                cta_usdt_update_trade_info(key, {
+                    'signal': overlay.get('last_signal', 0),
+                    'signal_time': write_time,
+                    'position_amount': target_qty,
+                    'is_tpsl': 0,
+                })
+                update_unified_halfset_overlay_state(key, {
+                    'last_signal': overlay.get('last_signal', 0),
+                    'last_signal_time': write_time,
+                    'target_qty': target_qty,
+                    'last_status': res.get('status', 0),
+                    'last_msg': res.get('msg', ''),
+                })
+        return res
+    trade_info = cta_usdt_get_trade_info(cta_key)
     if trade_info is None:
         return {'status': 500, 'msg': 'CTA策略不存在'}
     signal, signal_time = cta_unified_halfset_get_last_effective_signal(
-        exchange, item, trade_info)
+        exchange, item_data, trade_info)
     return cta_unified_halfset_handle_cta_signal(
         exchange,
-        item,
+        item_data,
         signal,
-        cta_key=item.cta_key,
+        cta_key=cta_key,
         signal_time=signal_time)
+
+
+def cta_unified_halfset_overlay_list(strategy, asset='ETH'):
+    items = cta_unified_halfset_get_overlay_dicts(strategy, asset)
+    return {'status': 0, 'msg': '', 'data': {'items': items, 'total': len(items)}}
+
+
+def cta_unified_halfset_overlay_deploy(data, binance_list=None):
+    defaults = cta_unified_halfset_overlay_defaults(data)
+    if not defaults['strategy']:
+        return {'status': 500, 'msg': 'strategy不能为空'}
+    if not has_app_context():
+        return {'status': 500, 'msg': '需要在应用上下文中部署CTA overlay'}
+
+    halfset = cta_unified_halfset_get_config(defaults['strategy'],
+                                             defaults['asset'])
+    if halfset is None:
+        return {'status': 500, 'msg': '请先配置完整半套父模式'}
+
+    deploy_res = cta_unified_overlay_deploy({
+        'strategy': defaults['strategy'],
+        'asset': defaults['asset'],
+        'symbol': defaults['symbol'],
+        'interval': defaults['interval'],
+        'cta': defaults['cta'],
+        'period': defaults['period'],
+        'init_value': data.get('init_value') or '50',
+        'trade_ratio': defaults['trade_ratio'],
+        'open_tpsl': data.get('open_tpsl', 1),
+        'takeprofit_percentage': data.get('takeprofit_percentage', '0.5'),
+        'takeprofit_drawdown_percentage': data.get(
+            'takeprofit_drawdown_percentage', '0.05'),
+        'stoploss_percentage': data.get('stoploss_percentage', '0.2'),
+    }, binance_list)
+    if deploy_res.get('status') != 0:
+        return deploy_res
+
+    item = cta_unified_halfset_get_overlay(defaults['cta_key'])
+    if item is None:
+        item = CtaUnifiedHalfsetOverlay(strategy=defaults['strategy'],
+                                        asset=defaults['asset'],
+                                        cta_key=defaults['cta_key'])
+        db.session.add(item)
+    elif item.strategy != defaults['strategy']:
+        return {
+            'status': 500,
+            'msg': f"{defaults['cta_key']}已属于其他账户{item.strategy}",
+        }
+    for key in ('symbol', 'interval', 'cta', 'period'):
+        setattr(item, key, defaults[key])
+    item.weight = Decimal(defaults['weight'])
+    item.trade_ratio = Decimal(defaults['trade_ratio'])
+    item.last_status = 0
+    item.last_msg = '完整半套CTA overlay已部署，未自动启动'
+    db.session.commit()
+    return {'status': 0, 'msg': item.last_msg, 'data': item.to_dict()}
+
+
+def cta_unified_halfset_overlay_update(data):
+    defaults = cta_unified_halfset_overlay_defaults(data)
+    item = cta_unified_halfset_get_overlay(data.get('cta_key')
+                                           or defaults['cta_key'])
+    if item is None:
+        return {'status': 500, 'msg': 'CTA overlay不存在'}
+    if defaults['strategy'] and item.strategy != defaults['strategy']:
+        return {'status': 500, 'msg': f'{item.cta_key}不属于{defaults["strategy"]}'}
+    item.weight = Decimal(defaults['weight'])
+    item.trade_ratio = Decimal(defaults['trade_ratio'])
+    item.last_status = 0
+    item.last_msg = '完整半套CTA overlay参数已更新'
+    db.session.commit()
+    cta_unified_overlay_update_cta({
+        'strategy': item.strategy,
+        'cta_key': item.cta_key,
+        'trade_ratio': defaults['trade_ratio'],
+        'open_tpsl': data.get('open_tpsl', 1),
+        'takeprofit_percentage': data.get('takeprofit_percentage', '0.5'),
+        'takeprofit_drawdown_percentage': data.get(
+            'takeprofit_drawdown_percentage', '0.05'),
+        'stoploss_percentage': data.get('stoploss_percentage', '0.2'),
+    })
+    return {'status': 0, 'msg': item.last_msg, 'data': item.to_dict()}
+
+
+def cta_unified_halfset_overlay_set_running(data, is_running):
+    defaults = cta_unified_halfset_overlay_defaults(data)
+    item = cta_unified_halfset_get_overlay(data.get('cta_key')
+                                           or defaults['cta_key'])
+    if item is None:
+        return {'status': 500, 'msg': 'CTA overlay不存在'}
+    item.is_running = 1 if is_running else 0
+    item.last_status = 0
+    item.last_msg = '完整半套CTA overlay已启动' if is_running else '完整半套CTA overlay已暂停'
+    db.session.commit()
+    return {'status': 0, 'msg': item.last_msg, 'data': item.to_dict()}
+
+
+def cta_unified_halfset_overlay_delete(data):
+    defaults = cta_unified_halfset_overlay_defaults(data)
+    item = cta_unified_halfset_get_overlay(data.get('cta_key')
+                                           or defaults['cta_key'])
+    if item is None:
+        return {'status': 500, 'msg': 'CTA overlay不存在'}
+    item.is_running = 0
+    item.is_del = 1
+    item.last_status = 0
+    item.last_msg = '完整半套CTA overlay已删除，未自动平仓'
+    db.session.commit()
+    return {'status': 0, 'msg': item.last_msg, 'data': item.to_dict()}
 
 
 def cta_unified_overlay_defaults(data=None):
@@ -8367,6 +8755,8 @@ def cta_usdt_get_trade_info(cta_key):
             'stoploss_percentage': item.stoploss_percentage,
             'open_tpsl': item.open_tpsl,
             'interval': item.interval,
+            'cta': item.cta,
+            'period': item.period,
         }
     except Exception as e:
         log_print(e)
