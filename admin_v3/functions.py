@@ -1017,12 +1017,19 @@ def build_account_v2_position(exchange, raw_position, market_type):
     if amount == 0:
         return None
     symbol = raw_position.get('symbol', '')
-    notional = decimal_or_zero(raw_position.get('notional')
-                               or raw_position.get('notionalValue'))
-    if notional == 0:
-        mark_price = decimal_or_zero(raw_position.get('markPrice')
-                                     or raw_position.get('lastPrice'))
-        notional = amount * mark_price
+    mark_price = decimal_or_zero(raw_position.get('markPrice')
+                                 or raw_position.get('lastPrice'))
+    raw_notional = decimal_or_zero(raw_position.get('notional')
+                                   or raw_position.get('notionalValue'))
+    base_notional_qty = amount
+    if market_type == 'CM':
+        base_notional_qty = build_account_v2_cm_base_notional(
+            exchange, symbol, amount, mark_price, raw_notional)
+        notional = abs(base_notional_qty * mark_price) if mark_price > 0 else 0
+    else:
+        notional = abs(raw_notional)
+        if notional == 0:
+            notional = abs(amount * mark_price)
     unrealized = decimal_or_zero(raw_position.get('unRealizedProfit')
                                  or raw_position.get('unrealizedProfit'))
     side = 'SELL' if amount < 0 else 'BUY'
@@ -1031,9 +1038,9 @@ def build_account_v2_position(exchange, raw_position, market_type):
         'symbol': symbol,
         'side': side,
         'position_amount': decimal_to_float(amount, 8),
+        'base_notional_qty': decimal_to_float(base_notional_qty, 8),
         'entry_price': decimal_to_float(raw_position.get('entryPrice'), 8),
-        'mark_price': decimal_to_float(raw_position.get('markPrice')
-                                       or raw_position.get('lastPrice'), 8),
+        'mark_price': decimal_to_float(mark_price, 8),
         'notional_usd': decimal_to_float(notional, 4),
         'unrealized_profit_usd': decimal_to_float(unrealized, 4),
         'leverage': decimal_to_float(raw_position.get('leverage'), 4),
@@ -1197,6 +1204,43 @@ def find_account_v2_strategy_exposure(strategy_exposures, asset):
     return (strategy_exposures or [{}])[0] if strategy_exposures else {}
 
 
+def get_account_v2_cm_contract_size(exchange, symbol):
+    if exchange is None or not symbol:
+        return Decimal('0')
+    try:
+        exchange_info = get_dapi_public_exchange_info(exchange)
+        for item in exchange_info.get('symbols', []):
+            if (item.get('symbol') or '').upper() == symbol.upper():
+                return decimal_or_zero(item.get('contractSize'))
+    except Exception:
+        return Decimal('0')
+    return Decimal('0')
+
+
+def build_account_v2_cm_base_notional(exchange, symbol, amount, mark_price,
+                                      raw_notional):
+    if raw_notional != 0:
+        return raw_notional
+    contract_size = get_account_v2_cm_contract_size(exchange, symbol)
+    if contract_size > 0 and mark_price > 0:
+        return amount * contract_size / mark_price
+    return Decimal('0')
+
+
+def get_account_v2_unmanaged_cm_symbols(positions, base_asset, hedge_symbol):
+    base_asset = (base_asset or '').upper()
+    hedge_symbol = (hedge_symbol or '').upper()
+    symbols = []
+    for pos in positions or []:
+        symbol = (pos.get('symbol') or '').upper()
+        if ((pos.get('market_type') or '').upper() == 'CM'
+                and symbol.startswith(f'{base_asset}USD')
+                and symbol != hedge_symbol
+                and decimal_or_zero(pos.get('position_amount')) != 0):
+            symbols.append(symbol)
+    return sorted(set(symbols))
+
+
 def build_account_v2_dashboard_items(data, base_asset='ETH'):
     base_asset = (base_asset or 'ETH').upper()
     hedge_symbol = f'{base_asset}USDT'
@@ -1251,6 +1295,15 @@ def build_account_v2_dashboard_items(data, base_asset='ETH'):
         next_action_hint = '等待定时巡检或手动强制半套'
     else:
         next_action_hint = '半套仓位已接近目标'
+
+    unmanaged_cm_symbols = get_account_v2_unmanaged_cm_symbols(
+        data.get('positions', []), base_asset, exposure.get('hedge_symbol')
+        or hedge_symbol)
+    risk_note = (
+        '当前半套和 CTA 仍是两套逻辑，共用同一个U本位账户风险；这里的CTA仓位为按半套目标推算的overlay，不是统一目标仓位引擎。')
+    if unmanaged_cm_symbols:
+        risk_note += (
+            f' 检测到币本位 {",".join(unmanaged_cm_symbols)} 仓位，当前不由完整半套协调器管理。')
 
     return [{
         'strategy':
@@ -1307,7 +1360,7 @@ def build_account_v2_dashboard_items(data, base_asset='ETH'):
         'workflow':
             '全仓杠杆买ETH -> 现货/杠杆底仓 -> U本位半套 -> CTA overlay -> 净暴露',
         'risk_note':
-            '当前半套和 CTA 仍是两套逻辑，共用同一个U本位账户风险；这里的CTA仓位为按半套目标推算的overlay，不是统一目标仓位引擎。',
+            risk_note,
     }]
 
 

@@ -99,6 +99,49 @@ class UnifiedDashboardExchange:
         return {'symbol': params['symbol'], 'price': '3000'}
 
 
+class UnifiedCmEthPositionExchange(UnifiedDashboardExchange):
+    def papiGetUmPositionRisk(self, params=None):
+        return [{
+            'symbol': 'ETHUSDT',
+            'positionAmt': '0',
+        }]
+
+    def papiGetCmPositionRisk(self, params=None):
+        return [{
+            'symbol': 'ETHUSD_PERP',
+            'positionAmt': '-50',
+            'entryPrice': '2386.23',
+            'markPrice': '2332.43733673',
+            'notionalValue': '-0.2144',
+            'unRealizedProfit': '0.0048',
+            'leverage': '5',
+        }]
+
+
+class UnifiedCmContractSizeFallbackExchange(UnifiedCmEthPositionExchange):
+    def papiGetCmPositionRisk(self, params=None):
+        return [{
+            'symbol': 'ETHUSD_PERP',
+            'positionAmt': '-50',
+            'entryPrice': '2500',
+            'markPrice': '2500',
+            'unRealizedProfit': '0',
+            'leverage': '5',
+        }]
+
+    def dapiPublicGetExchangeInfo(self):
+        return {
+            'symbols': [{
+                'symbol': 'ETHUSD_PERP',
+                'contractStatus': 'TRADING',
+                'contractType': 'PERPETUAL',
+                'baseAsset': 'ETH',
+                'quoteAsset': 'USD',
+                'contractSize': '10',
+            }]
+        }
+
+
 class StandardDashboardExchange:
     def fapiPrivateV2_get_account(self):
         return {
@@ -342,6 +385,34 @@ class UnifiedDashboardAccountTest(unittest.TestCase):
         self.assertEqual(summary['data']['items'][0]['strategy'],
                          'admin_v3_unified')
 
+    def test_unified_cm_position_exposure_uses_usd_not_base_qty(self):
+        overview = get_account_v2_overview(UnifiedCmEthPositionExchange(),
+                                           'admin_v3_unified', 'unified')
+
+        positions = get_account_v2_overview_section(overview, 'positions')
+        summary = get_account_v2_overview_section(overview, 'summary')
+        position = positions['data']['items'][0]
+        row = summary['data']['items'][0]
+
+        self.assertEqual(position['symbol'], 'ETHUSD_PERP')
+        self.assertEqual(position['position_amount'], -50.0)
+        self.assertAlmostEqual(position['base_notional_qty'], -0.2144, 8)
+        self.assertAlmostEqual(position['notional_usd'], 500.0746, 4)
+        self.assertAlmostEqual(row['short_exposure_usd'], 500.0746, 4)
+        self.assertAlmostEqual(row['net_exposure_usd'], -500.0746, 4)
+        self.assertNotEqual(row['short_exposure_usd'], 0.2144)
+
+    def test_unified_cm_position_can_fallback_to_contract_size(self):
+        overview = get_account_v2_overview(
+            UnifiedCmContractSizeFallbackExchange(), 'admin_v3_unified',
+            'unified')
+
+        positions = get_account_v2_overview_section(overview, 'positions')
+        position = positions['data']['items'][0]
+
+        self.assertAlmostEqual(position['base_notional_qty'], -0.2, 8)
+        self.assertAlmostEqual(position['notional_usd'], 500.0, 4)
+
     def test_account_v2_overview_exposes_wallet_assets_and_margin_debts(self):
         overview = get_account_v2_overview(self.exchange, 'admin_v3_unified',
                                            'unified')
@@ -415,6 +486,28 @@ class UnifiedDashboardAccountTest(unittest.TestCase):
         self.assertEqual(row['last_rebalance_time'], '2026-05-04 12:00:00')
         self.assertIn('巡检', row['next_action_hint'])
         self.assertIn('两套逻辑', row['risk_note'])
+
+    def test_dashboard_warns_when_cm_position_is_not_halfset_managed(self):
+        exposure = {
+            'asset': 'ETH',
+            'hedge_symbol': 'ETHUSDT',
+            'hedge_ratio': 0.5,
+            'target_base_qty': 0.25,
+            'current_um_position': 0,
+            'is_running': 1,
+            'live_trade_enabled': 1,
+        }
+
+        with patch('functions.get_account_v2_strategy_exposures',
+                   return_value=[exposure]):
+            overview = get_account_v2_overview(UnifiedCmEthPositionExchange(),
+                                               'admin_v3_unified', 'unified')
+
+        dashboard = get_account_v2_overview_section(overview, 'dashboard')
+        row = dashboard['data']['items'][0]
+
+        self.assertIn('检测到币本位 ETHUSD_PERP 仓位', row['risk_note'])
+        self.assertIn('不由完整半套协调器管理', row['risk_note'])
 
     def test_account_v2_dashboard_prompts_start_when_base_exists_without_rebalance(self):
         with patch('functions.get_account_v2_strategy_exposures',

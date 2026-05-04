@@ -270,6 +270,11 @@
                         "name": "last_msg",
                         "label": "最近结果",
                         "type": "text"
+                      },
+                      {
+                        "name": "risk_note",
+                        "label": "风险提示",
+                        "type": "text"
                       }
                     ],
                     "bulkActions": [],
@@ -1807,6 +1812,10 @@
                     "id": "u:account_topology_divider_positions"
                   },
                   {
+                    "type": "tpl",
+                    "tpl": "持仓暴露使用交易所真实仓位口径；如检测到币本位 ETHUSD_PERP 仓位，它会单独显示为合约张数、折算币数量和名义USD，不代表完整半套U本位协调器目标。"
+                  },
+                  {
                     "type": "crud",
                     "id": "u:account_topology_positions",
                     "title": "持仓暴露",
@@ -1835,7 +1844,12 @@
                       },
                       {
                         "name": "position_amount",
-                        "label": "持仓数量",
+                        "label": "持仓数量(张/币)",
+                        "type": "text"
+                      },
+                      {
+                        "name": "base_notional_qty",
+                        "label": "折算币数量",
                         "type": "text"
                       },
                       {
