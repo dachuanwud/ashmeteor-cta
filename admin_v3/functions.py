@@ -7295,13 +7295,73 @@ def cta_unified_overlay_row_to_dict(item):
     return {key: getattr(item, key, '') for key in keys}
 
 
+def cta_unified_overlay_build_recommendation(dashboard_item,
+                                             trade_ratio='1'):
+    base_qty = decimal_or_zero(dashboard_item.get('base_asset_qty'))
+    base_usd = decimal_or_zero(dashboard_item.get('base_asset_usd'))
+    hedge_ratio_raw = dashboard_item.get('hedge_ratio')
+    hedge_ratio = decimal_or_zero(hedge_ratio_raw)
+    target_hedge_qty = decimal_or_zero(dashboard_item.get('target_hedge_qty'))
+    trade_ratio_value = decimal_or_zero(trade_ratio) or Decimal('1')
+
+    if hedge_ratio < 0:
+        hedge_ratio = Decimal('0')
+    if hedge_ratio > 1:
+        hedge_ratio = Decimal('1')
+    if target_hedge_qty == 0 and base_qty != 0:
+        target_hedge_qty = base_qty * hedge_ratio
+
+    missing_inputs = (base_qty <= 0 or base_usd <= 0
+                      or hedge_ratio_raw in (None, ''))
+    if missing_inputs:
+        warning = '无法计算推荐投入，已使用保守默认50'
+        recommended_base_qty = Decimal('0')
+        recommended_notional = Decimal('0')
+        recommended_init_value = Decimal('50')
+    else:
+        remaining_ratio = Decimal('1') - hedge_ratio
+        recommended_base_qty = base_qty * remaining_ratio
+        recommended_notional = base_usd * remaining_ratio
+        recommended_init_value = recommended_notional / trade_ratio_value
+        warning = ''
+
+    flat_exposure = base_qty - target_hedge_qty
+    long_exposure = flat_exposure + recommended_base_qty
+    short_exposure = flat_exposure - recommended_base_qty
+    note = (
+        f'当前推荐覆盖剩余半仓：约 {decimal_to_float(recommended_base_qty, 8)} ETH / '
+        f'{decimal_to_float(recommended_notional, 2)} USDT')
+
+    return {
+        'recommended_cta_base_qty':
+            decimal_to_float(recommended_base_qty, 8),
+        'recommended_cta_notional_usd':
+            decimal_to_float(recommended_notional, 2),
+        'recommended_trade_ratio':
+            decimal_to_float(trade_ratio_value, 4),
+        'recommended_cta_init_value':
+            decimal_to_float(recommended_init_value, 2),
+        'cta_exposure_if_long':
+            decimal_to_float(long_exposure, 8),
+        'cta_exposure_if_flat':
+            decimal_to_float(flat_exposure, 8),
+        'cta_exposure_if_short':
+            decimal_to_float(short_exposure, 8),
+        'cta_overlay_coverage_note':
+            note,
+        'recommended_cta_sizing_warning':
+            warning,
+    }
+
+
 def cta_unified_overlay_get_summary(binance_list,
                                     strategy,
                                     asset='ETH',
                                     symbol='',
                                     interval='4h',
                                     cta='adapt_bolling_anti_chase',
-                                    period='[200,20]'):
+                                    period='[200,20]',
+                                    recommended_trade_ratio='1'):
     defaults = cta_unified_overlay_defaults({
         'strategy': strategy,
         'asset': asset,
@@ -7320,6 +7380,8 @@ def cta_unified_overlay_get_summary(binance_list,
     cta_data = cta_unified_overlay_row_to_dict(cta_item)
     cta_exists = bool(cta_data)
     cta_running = boolish(cta_data.get('is_running', 0))
+    sizing = cta_unified_overlay_build_recommendation(
+        dashboard_item, recommended_trade_ratio)
 
     if dashboard_item.get('rebalance_running') != '已启动':
         next_action_hint = '先启动或检查统一账户半套'
@@ -7363,10 +7425,26 @@ def cta_unified_overlay_get_summary(binance_list,
         'stoploss_percentage': cta_data.get('stoploss_percentage', ''),
         'next_action_hint': next_action_hint,
     }
+    row.update(sizing)
     return {'status': 0, 'msg': '', 'data': {'items': [row], 'total': 1}}
 
 
-def cta_unified_overlay_deploy(data):
+def cta_unified_overlay_deploy(data, binance_list=None):
+    data = dict(data or {})
+    if not data.get('init_value') and binance_list is not None:
+        summary = cta_unified_overlay_get_summary(
+            binance_list,
+            data.get('strategy') or '',
+            data.get('asset') or 'ETH',
+            data.get('symbol') or '',
+            data.get('interval') or '4h',
+            data.get('cta') or 'adapt_bolling_anti_chase',
+            data.get('period') or '[200,20]',
+            data.get('trade_ratio') or '1')
+        item = (summary.get('data', {}).get('items') or [{}])[0]
+        data['init_value'] = item.get('recommended_cta_init_value') or '50'
+        data['trade_ratio'] = data.get(
+            'trade_ratio') or item.get('recommended_trade_ratio') or '1'
     defaults = cta_unified_overlay_defaults(data)
     if not defaults['strategy']:
         return {'status': 500, 'msg': 'strategy不能为空'}

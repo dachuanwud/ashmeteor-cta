@@ -1026,8 +1026,10 @@ def cta_unified_overlay_summary_route():
     interval = request.args.get('interval', '4h')
     cta = request.args.get('cta', 'adapt_bolling_anti_chase')
     period = request.args.get('period', '[200,20]')
+    recommended_trade_ratio = request.args.get('trade_ratio', '1')
     res = make_response(jsonify(cta_unified_overlay_get_summary(
-        binance_list, strategy, asset, symbol, interval, cta, period)))
+        binance_list, strategy, asset, symbol, interval, cta, period,
+        recommended_trade_ratio)))
     res = decorate_res(res)
     return res
 
@@ -1039,7 +1041,7 @@ def cta_unified_overlay_deploy_route():
         res = decorate_res(res)
         return res
     data = request.get_json(silent=True) or request.form or {}
-    res = make_response(jsonify(cta_unified_overlay_deploy(data)))
+    res = make_response(jsonify(cta_unified_overlay_deploy(data, binance_list)))
     res = decorate_res(res)
     return res
 

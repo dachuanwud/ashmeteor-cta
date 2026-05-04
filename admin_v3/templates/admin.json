@@ -192,6 +192,36 @@
                         "type": "text"
                       },
                       {
+                        "name": "recommended_cta_base_qty",
+                        "label": "推荐CTA数量",
+                        "type": "text"
+                      },
+                      {
+                        "name": "recommended_cta_notional_usd",
+                        "label": "推荐CTA名义(USDT)",
+                        "type": "text"
+                      },
+                      {
+                        "name": "recommended_cta_init_value",
+                        "label": "推荐CTA投入",
+                        "type": "text"
+                      },
+                      {
+                        "name": "cta_exposure_if_long",
+                        "label": "CTA做多后净暴露",
+                        "type": "text"
+                      },
+                      {
+                        "name": "cta_exposure_if_flat",
+                        "label": "CTA空仓净暴露",
+                        "type": "text"
+                      },
+                      {
+                        "name": "cta_exposure_if_short",
+                        "label": "CTA做空后净暴露",
+                        "type": "text"
+                      },
+                      {
                         "name": "rebalance_running",
                         "label": "半套状态",
                         "type": "text"
@@ -562,6 +592,19 @@
                               "title": "创建或更新U本位CTA记录，不自动启动",
                               "body": [
                                 {
+                                  "type": "tpl",
+                                  "tpl": "半套空头负责固定对冲，CTA overlay 负责剩余半仓的趋势暴露。"
+                                },
+                                {
+                                  "type": "tpl",
+                                  "tpl": "当前推荐覆盖剩余半仓：约 ${recommended_cta_base_qty} ETH / ${recommended_cta_notional_usd} USDT"
+                                },
+                                {
+                                  "type": "tpl",
+                                  "visibleOn": "this.recommended_cta_sizing_warning",
+                                  "tpl": "${recommended_cta_sizing_warning}"
+                                },
+                                {
                                   "type": "static",
                                   "name": "strategy",
                                   "label": "账户",
@@ -618,8 +661,8 @@
                                 {
                                   "type": "input-number",
                                   "name": "init_value",
-                                  "label": "CTA初始投入",
-                                  "value": 50,
+                                  "label": "CTA推荐投入(USDT，可覆盖)",
+                                  "value": "${recommended_cta_init_value}",
                                   "min": 0,
                                   "step": 1
                                 },
@@ -627,9 +670,23 @@
                                   "type": "input-number",
                                   "name": "trade_ratio",
                                   "label": "CTA策略杠杆 trade_ratio",
-                                  "value": 1,
+                                  "value": "${recommended_trade_ratio}",
                                   "min": 0,
                                   "step": 0.1
+                                },
+                                {
+                                  "type": "formula",
+                                  "name": "recommended_cta_init_value_by_ratio",
+                                  "formula": "${FLOOR(${recommended_cta_notional_usd}/${trade_ratio}, 2)}"
+                                },
+                                {
+                                  "type": "static",
+                                  "name": "recommended_cta_init_value_by_ratio",
+                                  "label": "当前杠杆对应推荐投入"
+                                },
+                                {
+                                  "type": "tpl",
+                                  "tpl": "调整 trade_ratio 时，参考 CTA 初始投入 = 推荐CTA名义(USDT) / trade_ratio；你也可以直接覆盖上面的投入金额。"
                                 },
                                 {
                                   "type": "select",

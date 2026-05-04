@@ -21,6 +21,7 @@ class UnifiedOverlayTest(unittest.TestCase):
                 'items': [{
                     'strategy': 'admin_v3_unified',
                     'base_asset_qty': 0.5,
+                    'base_asset_usd': 1500,
                     'hedge_ratio': 0.5,
                     'target_hedge_qty': 0.25,
                     'current_um_position': -0.3,
@@ -65,7 +66,121 @@ class UnifiedOverlayTest(unittest.TestCase):
         self.assertEqual(item['cta_trade_ratio'], '1.5')
         self.assertEqual(item['cta_signal'], -1)
         self.assertEqual(item['cta_position_amount'], '-0.12')
+        self.assertEqual(item['recommended_cta_base_qty'], 0.25)
+        self.assertEqual(item['recommended_cta_notional_usd'], 750.0)
+        self.assertEqual(item['recommended_trade_ratio'], 1.0)
+        self.assertEqual(item['recommended_cta_init_value'], 750.0)
+        self.assertEqual(item['cta_exposure_if_long'], 0.5)
+        self.assertEqual(item['cta_exposure_if_flat'], 0.25)
+        self.assertEqual(item['cta_exposure_if_short'], 0.0)
+        self.assertIn('剩余半仓', item['cta_overlay_coverage_note'])
         self.assertEqual(item['next_action_hint'], '半套和CTA overlay已配置运行，关注净ETH暴露')
+
+    def test_overlay_summary_recommends_remaining_half_position_size(self):
+        overview = {'status': 0, 'data': {'strategy': 'admin_v3_unified'}}
+        dashboard = {
+            'status': 0,
+            'data': {
+                'items': [{
+                    'strategy': 'admin_v3_unified',
+                    'base_asset_qty': 0.4372623,
+                    'base_asset_usd': 1000,
+                    'hedge_ratio': 0.5,
+                    'target_hedge_qty': 0.21863115,
+                    'current_um_position': -0.218,
+                    'net_base_exposure': 0.2192623,
+                    'rebalance_running': '已启动',
+                    'live_trade_enabled': '已开启',
+                }]
+            }
+        }
+
+        with patch('functions.get_exchange', return_value=object()), \
+                patch('functions.get_exchange_account_type',
+                      return_value='unified'), \
+                patch('functions.get_account_v2_overview',
+                      return_value=overview), \
+                patch('functions.get_account_v2_overview_section',
+                      return_value=dashboard), \
+                patch('functions.cta_unified_overlay_find_cta',
+                      return_value=None):
+            res = cta_unified_overlay_get_summary([], 'admin_v3_unified',
+                                                  'ETH')
+
+        item = res['data']['items'][0]
+        self.assertEqual(item['recommended_cta_base_qty'], 0.21863115)
+        self.assertEqual(item['recommended_cta_notional_usd'], 500.0)
+        self.assertEqual(item['recommended_trade_ratio'], 1.0)
+        self.assertEqual(item['recommended_cta_init_value'], 500.0)
+        self.assertEqual(item['cta_exposure_if_long'], 0.4372623)
+        self.assertEqual(item['cta_exposure_if_flat'], 0.21863115)
+        self.assertEqual(item['cta_exposure_if_short'], 0.0)
+
+    def test_overlay_summary_recommends_lower_init_value_for_higher_trade_ratio(self):
+        overview = {'status': 0, 'data': {'strategy': 'admin_v3_unified'}}
+        dashboard = {
+            'status': 0,
+            'data': {
+                'items': [{
+                    'strategy': 'admin_v3_unified',
+                    'base_asset_qty': 0.5,
+                    'base_asset_usd': 1000,
+                    'hedge_ratio': 0.5,
+                    'target_hedge_qty': 0.25,
+                    'current_um_position': -0.25,
+                    'rebalance_running': '已启动',
+                }]
+            }
+        }
+
+        with patch('functions.get_exchange', return_value=object()), \
+                patch('functions.get_exchange_account_type',
+                      return_value='unified'), \
+                patch('functions.get_account_v2_overview',
+                      return_value=overview), \
+                patch('functions.get_account_v2_overview_section',
+                      return_value=dashboard), \
+                patch('functions.cta_unified_overlay_find_cta',
+                      return_value=None):
+            res = cta_unified_overlay_get_summary(
+                [], 'admin_v3_unified', 'ETH', recommended_trade_ratio='2')
+
+        item = res['data']['items'][0]
+        self.assertEqual(item['recommended_cta_notional_usd'], 500.0)
+        self.assertEqual(item['recommended_trade_ratio'], 2.0)
+        self.assertEqual(item['recommended_cta_init_value'], 250.0)
+
+    def test_overlay_summary_falls_back_to_safe_default_when_size_is_unknown(self):
+        overview = {'status': 0, 'data': {'strategy': 'admin_v3_unified'}}
+        dashboard = {
+            'status': 0,
+            'data': {
+                'items': [{
+                    'strategy': 'admin_v3_unified',
+                    'base_asset_qty': 0,
+                    'base_asset_usd': 0,
+                    'hedge_ratio': 0.5,
+                    'rebalance_running': '已启动',
+                }]
+            }
+        }
+
+        with patch('functions.get_exchange', return_value=object()), \
+                patch('functions.get_exchange_account_type',
+                      return_value='unified'), \
+                patch('functions.get_account_v2_overview',
+                      return_value=overview), \
+                patch('functions.get_account_v2_overview_section',
+                      return_value=dashboard), \
+                patch('functions.cta_unified_overlay_find_cta',
+                      return_value=None):
+            res = cta_unified_overlay_get_summary([], 'admin_v3_unified',
+                                                  'ETH')
+
+        item = res['data']['items'][0]
+        self.assertEqual(item['recommended_cta_init_value'], 50.0)
+        self.assertEqual(item['recommended_cta_base_qty'], 0.0)
+        self.assertIn('无法计算推荐投入', item['recommended_cta_sizing_warning'])
 
     def test_overlay_deploy_creates_recommended_cta_without_starting_it(self):
         with patch('functions.cta_unified_overlay_find_cta',
@@ -86,6 +201,30 @@ class UnifiedOverlayTest(unittest.TestCase):
         self.assertEqual(payload['cta'], 'adapt_bolling_anti_chase')
         self.assertEqual(payload['period'], '[200,20]')
         self.assertEqual(payload['trade_ratio'], '1')
+
+    def test_overlay_deploy_uses_summary_recommendation_when_init_value_is_missing(self):
+        summary = {
+            'status': 0,
+            'data': {
+                'items': [{
+                    'recommended_cta_init_value': 500.0,
+                    'recommended_trade_ratio': 1.0,
+                }]
+            }
+        }
+        with patch('functions.cta_unified_overlay_get_summary',
+                   return_value=summary), \
+                patch('functions.cta_unified_overlay_find_cta',
+                      return_value=None), \
+                patch('functions.cta_usdt_create_strategy',
+                      return_value={'status': 0, 'msg': 'created'}) as create:
+            res = cta_unified_overlay_deploy({'strategy': 'admin_v3_unified'},
+                                             binance_list=[object()])
+
+        self.assertEqual(res['status'], 0)
+        payload = create.call_args.args[0]
+        self.assertEqual(payload['init_value'], '500.0')
+        self.assertEqual(payload['trade_ratio'], '1.0')
 
     def test_overlay_deploy_rejects_cta_key_owned_by_other_strategy(self):
         existing = SimpleNamespace(strategy='other_strategy',
