@@ -141,6 +141,7 @@ class HalfsetTargetCalculationTest(unittest.TestCase):
 
         self.assertEqual(targets['half_target_qty'], Decimal('-0.21863115'))
         self.assertEqual(targets['cta_target_qty'], Decimal('0E-8'))
+        self.assertEqual(targets['signal'], 0)
         self.assertEqual(targets['total_target_qty'], Decimal('-0.21863115'))
         self.assertEqual(targets['overlays'][0]['target_qty'],
                          Decimal('0.109315575'))
@@ -164,6 +165,7 @@ class HalfsetTargetCalculationTest(unittest.TestCase):
             }])
 
         self.assertEqual(targets['cta_target_qty'], Decimal('0.218631150'))
+        self.assertEqual(targets['signal'], 1)
         self.assertEqual(targets['total_target_qty'], Decimal('0E-9'))
         self.assertEqual(targets['overlays'][0]['target_qty'],
                          Decimal('0.145754100'))
@@ -187,6 +189,7 @@ class HalfsetTargetCalculationTest(unittest.TestCase):
             }])
 
         self.assertEqual(targets['cta_target_qty'], Decimal('0.21863115'))
+        self.assertEqual(targets['signal'], 1)
         self.assertEqual(targets['overlays'][0]['target_qty'],
                          Decimal('0.21863115'))
         self.assertEqual(targets['overlays'][1]['target_qty'], Decimal('0'))

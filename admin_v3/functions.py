@@ -7377,6 +7377,11 @@ def calculate_unified_halfset_multi_targets(base_qty,
         cta_target_qty += target_qty
 
     total_target_qty = half_target_qty + cta_target_qty
+    aggregate_signal = 0
+    if cta_target_qty > 0:
+        aggregate_signal = 1
+    elif cta_target_qty < 0:
+        aggregate_signal = -1
     return {
         'base_qty': base_qty,
         'hedge_ratio': hedge_ratio,
@@ -7385,6 +7390,7 @@ def calculate_unified_halfset_multi_targets(base_qty,
         'total_target_qty': total_target_qty,
         'current_um_position': current_um_position,
         'order_delta_qty': total_target_qty - current_um_position,
+        'signal': aggregate_signal,
         'overlays': overlay_rows,
         'warning': '',
     }
