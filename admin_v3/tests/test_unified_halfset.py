@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 import schedule_task
 from functions import (calculate_unified_halfset_targets,
                        reconcile_unified_halfset_position,
+                       cta_unified_halfset_sync_last_signal,
                        cta_unified_margin_rebalance_run_items)
 
 
@@ -182,6 +183,66 @@ class HalfsetReconcileTest(unittest.TestCase):
 
 
 class HalfsetExecutionIsolationTest(unittest.TestCase):
+    def test_sync_last_signal_recomputes_last_effective_signal_from_klines(self):
+        klines = pd.DataFrame({
+            'candle_begin_time': pd.date_range('2026-01-01',
+                                               periods=5,
+                                               freq='4h'),
+            'open': [1, 2, 3, 4, 5],
+            'high': [1, 2, 3, 4, 5],
+            'low': [1, 2, 3, 4, 5],
+            'close': [1, 2, 3, 4, 5],
+            'volume': [1, 1, 1, 1, 1],
+        })
+        signal_df = klines.copy()
+        signal_df['signal'] = [0, None, 1, None, None]
+
+        class HalfsetItem:
+            cta_key = 'ETHUSDT_4h_adapt_bolling_anti_chase_[200,20]'
+            strategy = 'admin_v3_unified'
+            asset = 'ETH'
+            hedge_symbol = 'ETHUSDT'
+            interval = '4h'
+            cta = 'adapt_bolling_anti_chase'
+            period = '[200,20]'
+
+            def to_dict(self):
+                return {
+                    'cta_key': self.cta_key,
+                    'strategy': self.strategy,
+                    'asset': self.asset,
+                    'hedge_symbol': self.hedge_symbol,
+                    'interval': self.interval,
+                    'cta': self.cta,
+                    'period': self.period,
+                }
+
+        with mock.patch('functions.cta_unified_halfset_get_active',
+                        return_value=HalfsetItem()), \
+                mock.patch('functions.cta_usdt_get_trade_info',
+                           return_value={
+                               'strategy': 'admin_v3_unified',
+                               'symbol': 'ETHUSDT',
+                               'interval': '4h',
+                               'signal': 0,
+                           }), \
+                mock.patch('functions.get_kline', return_value=klines), \
+                mock.patch('functions.factors.parse_cta_period',
+                           return_value=[200, 20]), \
+                mock.patch('functions.factors.adapt_bolling_anti_chase',
+                           return_value=(signal_df, None)), \
+                mock.patch('functions.cta_unified_halfset_handle_cta_signal',
+                           return_value={'status': 0}) as handle:
+            res = cta_unified_halfset_sync_last_signal(
+                object(), {
+                    'strategy': 'admin_v3_unified',
+                    'asset': 'ETH',
+                })
+
+        self.assertEqual(res['status'], 0)
+        handle.assert_called_once()
+        self.assertEqual(handle.call_args.args[2], 1)
+
     def test_cta_period_delegates_to_halfset_coordinator_without_direct_cta_order(self):
         klines = pd.DataFrame({
             'candle_begin_time': pd.date_range('2026-01-01', periods=3, freq='4h'),

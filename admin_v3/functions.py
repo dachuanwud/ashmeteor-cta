@@ -7718,7 +7718,8 @@ def cta_unified_halfset_handle_cta_signal(exchange,
                                           signal,
                                           cta_key=None,
                                           last_price=None,
-                                          live_trade_enabled=None):
+                                          live_trade_enabled=None,
+                                          signal_time=None):
     item = _halfset_to_dict(halfset_item)
     if not item:
         return {'status': 500, 'msg': '完整半套模式未配置'}
@@ -7733,9 +7734,10 @@ def cta_unified_halfset_handle_cta_signal(exchange,
         last_price=last_price)
     if res.get('status') == 0:
         target_qty = res.get('data', {}).get('cta_target_qty', Decimal('0'))
+        write_time = signal_time or datetime.now()
         update = {
             'signal': signal,
-            'signal_time': datetime.now(),
+            'signal_time': write_time,
             'position_amount': target_qty,
             'is_tpsl': 0,
         }
@@ -7744,9 +7746,40 @@ def cta_unified_halfset_handle_cta_signal(exchange,
             update['close_price'] = last_price
         cta_usdt_update_trade_info(cta_key or item.get('cta_key'), update)
         update_unified_halfset_state(item.get('strategy'), item.get('asset'), {
-            'last_signal_time': datetime.now(),
+            'last_signal_time': write_time,
         })
     return res
+
+
+def cta_unified_halfset_get_last_effective_signal(exchange, item, trade_info):
+    item_data = _halfset_to_dict(item)
+    asset = item_data.get('asset') or 'ETH'
+    symbol = item_data.get('hedge_symbol') or trade_info.get(
+        'symbol') or f'{asset}USDT'
+    interval = item_data.get('interval') or trade_info.get('interval') or '4h'
+    cta = item_data.get('cta') or 'adapt_bolling_anti_chase'
+    period = item_data.get('period') or '[200,20]'
+
+    symbol_data = get_kline(exchange, symbol, interval, 10000)
+    df, *_ = getattr(factors, cta)(symbol_data.copy(),
+                                   factors.parse_cta_period(period))
+    if 'signal' not in df.columns:
+        return 0, None
+
+    signals = df['signal'].replace([np.inf, -np.inf], np.nan)
+    valid_signals = signals.dropna()
+    if valid_signals.empty:
+        signal_time = None
+        if 'candle_begin_time' in df.columns and len(df) > 0:
+            signal_time = df.iloc[-1]['candle_begin_time']
+        return 0, signal_time
+
+    last_idx = valid_signals.index[-1]
+    signal = int(_normalize_halfset_signal(valid_signals.iloc[-1]))
+    signal_time = None
+    if 'candle_begin_time' in df.columns:
+        signal_time = df.loc[last_idx, 'candle_begin_time']
+    return signal, signal_time
 
 
 def cta_unified_halfset_sync_last_signal(exchange, data):
@@ -7758,8 +7791,14 @@ def cta_unified_halfset_sync_last_signal(exchange, data):
     trade_info = cta_usdt_get_trade_info(item.cta_key)
     if trade_info is None:
         return {'status': 500, 'msg': 'CTA策略不存在'}
+    signal, signal_time = cta_unified_halfset_get_last_effective_signal(
+        exchange, item, trade_info)
     return cta_unified_halfset_handle_cta_signal(
-        exchange, item, trade_info.get('signal', 0), cta_key=item.cta_key)
+        exchange,
+        item,
+        signal,
+        cta_key=item.cta_key,
+        signal_time=signal_time)
 
 
 def cta_unified_overlay_defaults(data=None):
