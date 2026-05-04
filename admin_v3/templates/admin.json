@@ -34,6 +34,16 @@
                             "actionType": "reload"
                           },
                           {
+                            "componentId": "u:account_topology_wallet_assets",
+                            "args": {},
+                            "actionType": "reload"
+                          },
+                          {
+                            "componentId": "u:account_topology_margin_debts",
+                            "args": {},
+                            "actionType": "reload"
+                          },
+                          {
                             "componentId": "u:account_topology_positions",
                             "args": {},
                             "actionType": "reload"
@@ -67,6 +77,16 @@
                             "actionType": "reload"
                           },
                           {
+                            "componentId": "u:account_topology_wallet_assets",
+                            "args": {},
+                            "actionType": "reload"
+                          },
+                          {
+                            "componentId": "u:account_topology_margin_debts",
+                            "args": {},
+                            "actionType": "reload"
+                          },
+                          {
                             "componentId": "u:account_topology_positions",
                             "args": {},
                             "actionType": "reload"
@@ -78,6 +98,153 @@
                           }
                         ]
                       }
+                    }
+                  },
+                  {
+                    "type": "button",
+                    "id": "u:unified_base_asset_buy_preview",
+                    "label": "统一账户底仓买入预览",
+                    "level": "info",
+                    "size": "sm",
+                    "actionType": "dialog",
+                    "dialog": {
+                      "type": "dialog",
+                      "title": "统一账户底仓买入预览",
+                      "body": [
+                        {
+                          "type": "form",
+                          "body": [
+                            {
+                              "type": "input-text",
+                              "name": "asset",
+                              "label": "底仓资产",
+                              "value": "ETH"
+                            },
+                            {
+                              "type": "select",
+                              "name": "buy_mode",
+                              "label": "买入模式",
+                              "value": "margin",
+                              "options": [
+                                {
+                                  "label": "全仓杠杆买入",
+                                  "value": "margin"
+                                },
+                                {
+                                  "label": "现金买入",
+                                  "value": "cash"
+                                }
+                              ]
+                            },
+                            {
+                              "type": "input-number",
+                              "name": "quote_usd",
+                              "label": "买入名义USDT",
+                              "min": 10,
+                              "step": 1
+                            },
+                            {
+                              "type": "input-number",
+                              "name": "hedge_ratio",
+                              "label": "U本位半套比例",
+                              "value": 0.5,
+                              "min": 0,
+                              "step": 0.1
+                            }
+                          ],
+                          "api": {
+                            "method": "post",
+                            "url": "/cta/unified/base_asset/buy/preview",
+                            "data": {
+                              "strategy": "${strategy}",
+                              "asset": "${asset}",
+                              "buy_mode": "${buy_mode}",
+                              "quote_usd": "${quote_usd}",
+                              "hedge_ratio": "${hedge_ratio}"
+                            }
+                          }
+                        }
+                      ],
+                      "showCloseButton": true,
+                      "showErrorMsg": true
+                    }
+                  },
+                  {
+                    "type": "button",
+                    "id": "u:unified_base_asset_buy_execute",
+                    "label": "执行统一账户底仓买入",
+                    "level": "danger",
+                    "size": "sm",
+                    "actionType": "dialog",
+                    "dialog": {
+                      "type": "dialog",
+                      "title": "执行统一账户底仓买入",
+                      "body": [
+                        {
+                          "type": "form",
+                          "body": [
+                            {
+                              "type": "input-text",
+                              "name": "asset",
+                              "label": "底仓资产",
+                              "value": "ETH"
+                            },
+                            {
+                              "type": "select",
+                              "name": "buy_mode",
+                              "label": "买入模式",
+                              "value": "margin",
+                              "options": [
+                                {
+                                  "label": "全仓杠杆买入",
+                                  "value": "margin"
+                                },
+                                {
+                                  "label": "现金买入",
+                                  "value": "cash"
+                                }
+                              ]
+                            },
+                            {
+                              "type": "input-number",
+                              "name": "quote_usd",
+                              "label": "买入名义USDT",
+                              "min": 10,
+                              "step": 1
+                            },
+                            {
+                              "type": "input-number",
+                              "name": "hedge_ratio",
+                              "label": "U本位半套比例",
+                              "value": 0.5,
+                              "min": 0,
+                              "step": 0.1
+                            },
+                            {
+                              "type": "switch",
+                              "name": "live_trade_enabled",
+                              "label": "真实下单确认",
+                              "trueValue": 1,
+                              "falseValue": 0,
+                              "value": 0
+                            }
+                          ],
+                          "api": {
+                            "method": "post",
+                            "url": "/cta/unified/base_asset/buy/execute",
+                            "data": {
+                              "strategy": "${strategy}",
+                              "asset": "${asset}",
+                              "buy_mode": "${buy_mode}",
+                              "quote_usd": "${quote_usd}",
+                              "hedge_ratio": "${hedge_ratio}",
+                              "live_trade_enabled": "${live_trade_enabled}"
+                            }
+                          }
+                        }
+                      ],
+                      "showCloseButton": true,
+                      "showErrorMsg": true
                     }
                   },
                   {
@@ -220,6 +387,129 @@
                     "silentPolling": true
                   },
                   {
+                    "type": "crud",
+                    "id": "u:account_topology_wallet_assets",
+                    "title": "资产桶明细",
+                    "syncLocation": false,
+                    "api": {
+                      "method": "get",
+                      "url": "/account/v2/overview?strategy=${strategy}&section=wallet_assets"
+                    },
+                    "mode": "table",
+                    "columns": [
+                      {
+                        "name": "asset",
+                        "label": "资产",
+                        "type": "text"
+                      },
+                      {
+                        "name": "margin_or_spot_amount",
+                        "label": "现货/杠杆数量",
+                        "type": "text"
+                      },
+                      {
+                        "name": "cross_margin_free",
+                        "label": "可用",
+                        "type": "text"
+                      },
+                      {
+                        "name": "cross_margin_locked",
+                        "label": "锁定",
+                        "type": "text"
+                      },
+                      {
+                        "name": "um_wallet_amount",
+                        "label": "U本位钱包",
+                        "type": "text"
+                      },
+                      {
+                        "name": "cm_wallet_amount",
+                        "label": "币本位钱包",
+                        "type": "text"
+                      },
+                      {
+                        "name": "cross_margin_borrowed",
+                        "label": "借款",
+                        "type": "text"
+                      },
+                      {
+                        "name": "cross_margin_interest",
+                        "label": "利息",
+                        "type": "text"
+                      },
+                      {
+                        "name": "margin_or_spot_usd",
+                        "label": "底仓折算USD",
+                        "type": "text"
+                      },
+                      {
+                        "name": "is_base_asset_available",
+                        "label": "可作底仓",
+                        "type": "text"
+                      }
+                    ],
+                    "bulkActions": [],
+                    "itemActions": [],
+                    "perPage": 100,
+                    "perPageAvailable": [
+                      10
+                    ],
+                    "interval": 60000,
+                    "silentPolling": true
+                  },
+                  {
+                    "type": "crud",
+                    "id": "u:account_topology_margin_debts",
+                    "title": "现货/杠杆负债",
+                    "syncLocation": false,
+                    "api": {
+                      "method": "get",
+                      "url": "/account/v2/overview?strategy=${strategy}&section=margin_debts"
+                    },
+                    "mode": "table",
+                    "placeholder": "-",
+                    "columns": [
+                      {
+                        "name": "asset",
+                        "label": "负债资产",
+                        "type": "text"
+                      },
+                      {
+                        "name": "borrowed_amount",
+                        "label": "借款数量",
+                        "type": "text"
+                      },
+                      {
+                        "name": "interest_amount",
+                        "label": "利息数量",
+                        "type": "text"
+                      },
+                      {
+                        "name": "debt_amount",
+                        "label": "总负债数量",
+                        "type": "text"
+                      },
+                      {
+                        "name": "debt_usd",
+                        "label": "总负债(USD)",
+                        "type": "text"
+                      },
+                      {
+                        "name": "data_source",
+                        "label": "数据源",
+                        "type": "text"
+                      }
+                    ],
+                    "bulkActions": [],
+                    "itemActions": [],
+                    "perPage": 100,
+                    "perPageAvailable": [
+                      10
+                    ],
+                    "interval": 60000,
+                    "silentPolling": true
+                  },
+                  {
                     "type": "divider",
                     "id": "u:account_topology_divider_positions"
                   },
@@ -339,6 +629,21 @@
                       {
                         "name": "position_gap",
                         "label": "仓位差额",
+                        "type": "text"
+                      },
+                      {
+                        "name": "net_base_exposure",
+                        "label": "净ETH暴露",
+                        "type": "text"
+                      },
+                      {
+                        "name": "buy_mode",
+                        "label": "买入模式",
+                        "type": "text"
+                      },
+                      {
+                        "name": "last_borrow_amount",
+                        "label": "最近借款",
                         "type": "text"
                       },
                       {

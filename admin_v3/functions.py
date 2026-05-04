@@ -918,6 +918,8 @@ def build_account_v2_empty_overview(strategy, account_type):
         'gross_exposure_usd': 0.0,
         'leverage_ratio': 0.0,
         'wallets': [],
+        'wallet_assets': [],
+        'margin_debts': [],
         'positions': [],
         'strategy_exposures': [],
     }
@@ -948,6 +950,65 @@ def build_account_v2_wallet(wallet_type,
         'assets_detail': json.dumps(assets or [], ensure_ascii=False),
         'data_source': data_source,
     }
+
+
+def build_account_v2_wallet_assets(exchange, balance_assets):
+    items = []
+    for raw in balance_assets:
+        asset = (raw.get('asset') or '').upper()
+        if not asset:
+            continue
+        total_wallet = decimal_or_zero(raw.get('totalWalletBalance'))
+        cross_free = decimal_or_zero(raw.get('crossMarginFree'))
+        cross_locked = decimal_or_zero(raw.get('crossMarginLocked'))
+        cross_borrowed = decimal_or_zero(raw.get('crossMarginBorrowed'))
+        cross_interest = decimal_or_zero(raw.get('crossMarginInterest'))
+        um_wallet = decimal_or_zero(raw.get('umWalletBalance'))
+        um_pnl = decimal_or_zero(raw.get('umUnrealizedPNL'))
+        cm_wallet = decimal_or_zero(raw.get('cmWalletBalance'))
+        cm_pnl = decimal_or_zero(raw.get('cmUnrealizedPNL'))
+        margin_or_spot = cross_free + cross_locked
+        items.append({
+            'asset': asset,
+            'total_wallet_amount': decimal_to_float(total_wallet, 8),
+            'margin_or_spot_amount': decimal_to_float(margin_or_spot, 8),
+            'cross_margin_free': decimal_to_float(cross_free, 8),
+            'cross_margin_locked': decimal_to_float(cross_locked, 8),
+            'cross_margin_borrowed': decimal_to_float(cross_borrowed, 8),
+            'cross_margin_interest': decimal_to_float(cross_interest, 8),
+            'um_wallet_amount': decimal_to_float(um_wallet, 8),
+            'um_unrealized_pnl_amount': decimal_to_float(um_pnl, 8),
+            'cm_wallet_amount': decimal_to_float(cm_wallet, 8),
+            'cm_unrealized_pnl_amount': decimal_to_float(cm_pnl, 8),
+            'equity_usd': decimal_to_float(
+                asset_amount_to_usd(exchange, asset, total_wallet), 4),
+            'margin_or_spot_usd': decimal_to_float(
+                asset_amount_to_usd(exchange, asset, margin_or_spot), 4),
+            'debt_usd': decimal_to_float(
+                asset_amount_to_usd(exchange, asset,
+                                    cross_borrowed + cross_interest), 4),
+            'is_base_asset_available': bool(margin_or_spot > 0
+                                            and asset not in ('USDT', 'USD')),
+        })
+    return items
+
+
+def build_account_v2_margin_debts(exchange, wallet_assets):
+    debts = []
+    for item in wallet_assets:
+        borrowed = decimal_or_zero(item.get('cross_margin_borrowed'))
+        interest = decimal_or_zero(item.get('cross_margin_interest'))
+        if borrowed == 0 and interest == 0:
+            continue
+        debts.append({
+            'asset': item.get('asset', ''),
+            'borrowed_amount': decimal_to_float(borrowed, 8),
+            'interest_amount': decimal_to_float(interest, 8),
+            'debt_amount': decimal_to_float(borrowed + interest, 8),
+            'debt_usd': decimal_to_float(item.get('debt_usd'), 4),
+            'data_source': 'papiGetBalance',
+        })
+    return debts
 
 
 def build_account_v2_position(exchange, raw_position, market_type):
@@ -1018,10 +1079,6 @@ def build_account_v2_unified_wallets(exchange, balance_assets):
         cross_free = decimal_or_zero(item.get('crossMarginFree'))
         cross_locked = decimal_or_zero(item.get('crossMarginLocked'))
         margin_wallet = cross_free + cross_locked
-        if margin_wallet == 0:
-            margin_wallet = total_wallet - um_wallet - cm_wallet
-        if margin_wallet < 0:
-            margin_wallet = Decimal('0')
 
         asset_parts = {
             'UM': (um_wallet, um_wallet + um_pnl, um_wallet, um_pnl),
@@ -1066,7 +1123,7 @@ def build_account_v2_unified_wallets(exchange, balance_assets):
     ]
 
 
-def get_account_v2_strategy_exposures(strategy):
+def get_account_v2_strategy_exposures(strategy, exchange=None):
     if not has_app_context():
         return []
     try:
@@ -1078,6 +1135,26 @@ def get_account_v2_strategy_exposures(strategy):
         for row in query.order_by(CtaUnifiedMarginRebalance.asset).all():
             item = row.to_dict()
             item['exposure_type'] = '统一账户半套'
+            if exchange is not None:
+                try:
+                    account = make_binance_account_adapter(
+                        exchange, ACCOUNT_TYPE_UNIFIED)
+                    balance = account.get_margin_asset_balance(row.asset)
+                    position = get_um_position_amount(account,
+                                                      row.hedge_symbol)
+                    base_qty = balance['total']
+                    target_qty = decimal_or_zero(row.hedge_ratio) * base_qty
+                    item['asset_base_qty'] = decimal_to_float(base_qty, 8)
+                    item['current_um_position'] = decimal_to_float(position, 8)
+                    item['target_base_qty'] = decimal_to_float(target_qty, 8)
+                    item['position_gap'] = decimal_to_float(-target_qty
+                                                            - position, 8)
+                    item['net_base_exposure'] = decimal_to_float(base_qty
+                                                                 + position, 8)
+                    item['base_wallet_source'] = (
+                        item.get('base_wallet_source') or 'MARGIN_OR_SPOT')
+                except Exception as preview_error:
+                    item['preview_error'] = str(preview_error)
             items.append(item)
         return items
     except Exception as e:
@@ -1100,6 +1177,8 @@ def get_account_v2_overview(exchange,
         summary = account.get_account_summary()
         balance_assets = account.get_balance_assets()
         wallets = build_account_v2_unified_wallets(exchange, balance_assets)
+        wallet_assets = build_account_v2_wallet_assets(exchange, balance_assets)
+        margin_debts = build_account_v2_margin_debts(exchange, wallet_assets)
         raw_positions = []
         for market_type, getter in (('UM', account.get_um_position_risk),
                                     ('CM', account.get_cm_position_risk)):
@@ -1141,10 +1220,14 @@ def get_account_v2_overview(exchange,
                     if total_equity > 0 else 0, 4),
             'wallets':
                 wallets,
+            'wallet_assets':
+                wallet_assets,
+            'margin_debts':
+                margin_debts,
             'positions':
                 positions,
             'strategy_exposures':
-                get_account_v2_strategy_exposures(strategy),
+                get_account_v2_strategy_exposures(strategy, exchange),
         })
         return {'status': 0, 'msg': '', 'data': data}
 
@@ -1211,10 +1294,14 @@ def get_account_v2_overview(exchange,
                              if total_equity > 0 else 0, 4),
         'wallets':
             wallets,
+        'wallet_assets':
+            [],
+        'margin_debts':
+            [],
         'positions':
             positions,
         'strategy_exposures':
-            get_account_v2_strategy_exposures(strategy),
+            get_account_v2_strategy_exposures(strategy, exchange),
     })
     return {'status': 0, 'msg': '', 'data': data}
 
@@ -6418,14 +6505,231 @@ def get_um_position_amount(account, hedge_symbol):
     return Decimal('0')
 
 
+def decimal_to_quote_string(value):
+    value = decimal_or_zero(value)
+    return format(value.quantize(Decimal('0.01'), rounding=ROUND_DOWN), 'f')
+
+
+def get_margin_max_borrowable_amount(account, asset):
+    try:
+        res = account.get_margin_max_borrowable(asset)
+    except Exception:
+        return Decimal('0')
+    if isinstance(res, list):
+        res = res[0] if res else {}
+    return decimal_or_zero(res.get('amount') or res.get('borrowLimit')
+                           or res.get('maxBorrowable') or res.get('maxBorrow')
+                           or '0')
+
+
+def normalize_unified_buy_mode(buy_mode):
+    return 'margin' if buy_mode == 'margin' else 'cash'
+
+
+def build_unified_base_asset_margin_order(asset, quote_usd, buy_mode):
+    buy_mode = normalize_unified_buy_mode(buy_mode)
+    params = {
+        'symbol': f'{asset.upper()}USDT',
+        'side': 'BUY',
+        'type': 'MARKET',
+        'quoteOrderQty': decimal_to_quote_string(quote_usd),
+    }
+    if buy_mode == 'margin':
+        params['sideEffectType'] = 'MARGIN_BUY'
+    return params
+
+
+def build_um_rebalance_order_preview(exchange, asset, base_qty, hedge_ratio):
+    hedge_symbol = f'{asset.upper()}USDT'
+    try:
+        trade_rules = get_um_symbol_trade_rules(exchange, hedge_symbol)
+    except Exception:
+        trade_rules = None
+    step_size = Decimal('0.001')
+    min_qty = Decimal('0')
+    if trade_rules is not None:
+        step_size = trade_rules['step_size']
+        min_qty = trade_rules['min_qty']
+    target_qty = decimal_to_step(decimal_or_zero(base_qty) *
+                                 decimal_or_zero(hedge_ratio), step_size)
+    return {
+        'symbol': hedge_symbol,
+        'side': 'SELL',
+        'type': 'MARKET',
+        'quantity': decimal_to_step_string(target_qty, step_size),
+        'min_qty': decimal_to_float(min_qty, 8),
+    }
+
+
+def preview_unified_base_asset_buy(exchange,
+                                   strategy,
+                                   asset='ETH',
+                                   quote_usd='0',
+                                   buy_mode='margin',
+                                   hedge_ratio='0.5'):
+    if exchange is None or not strategy:
+        return {'status': 500, 'msg': 'params error'}
+    asset = (asset or '').upper()
+    quote_usd = decimal_or_zero(quote_usd)
+    if asset == '' or quote_usd < Decimal('10'):
+        return {'status': 500, 'msg': '请填写至少10U的底仓买入名义'}
+
+    buy_mode = normalize_unified_buy_mode(buy_mode)
+    account = make_binance_account_adapter(exchange, ACCOUNT_TYPE_UNIFIED)
+    summary = account.get_account_summary()
+    account_status = summary.get('accountStatus', 'UNKNOWN')
+    if account_status != 'NORMAL':
+        return {'status': 500, 'msg': f'统一账户状态异常: {account_status}'}
+
+    available = decimal_or_zero(summary.get('totalAvailableBalance'))
+    max_borrowable = (get_margin_max_borrowable_amount(account, 'USDT')
+                      if buy_mode == 'margin' else Decimal('0'))
+    if buy_mode == 'cash' and available < quote_usd:
+        return {
+            'status': 500,
+            'msg': f'统一账户可用余额不足，可用 {available} USDT，需要 {quote_usd} USDT',
+        }
+    if buy_mode == 'margin' and available + max_borrowable < quote_usd:
+        return {
+            'status': 500,
+            'msg': (f'统一账户可借额度不足，可用 {available} USDT，'
+                    f'最大可借 {max_borrowable} USDT，需要 {quote_usd} USDT'),
+        }
+
+    try:
+        ticker = decimal_or_zero(
+            exchange.public_get_ticker_price({'symbol':
+                                              f'{asset}USDT'})['price'])
+    except Exception:
+        ticker = Decimal('0')
+    estimated_base_qty = quote_usd / ticker if ticker > 0 else Decimal('0')
+    margin_order = build_unified_base_asset_margin_order(asset, quote_usd,
+                                                         buy_mode)
+    rebalance_order = build_um_rebalance_order_preview(exchange, asset,
+                                                       estimated_base_qty,
+                                                       hedge_ratio)
+    estimated_borrow = max(Decimal('0'), quote_usd - available)
+    if buy_mode == 'cash':
+        estimated_borrow = Decimal('0')
+    return {
+        'status': 0,
+        'msg': '',
+        'data': {
+            'strategy': strategy,
+            'asset': asset,
+            'buy_mode': buy_mode,
+            'quote_usd': decimal_to_float(quote_usd, 4),
+            'available_usd': decimal_to_float(available, 4),
+            'max_borrowable_usd': decimal_to_float(max_borrowable, 4),
+            'estimated_borrow_usd': decimal_to_float(estimated_borrow, 4),
+            'estimated_base_qty': decimal_to_float(estimated_base_qty, 8),
+            'hedge_ratio': decimal_to_float(hedge_ratio, 4),
+            'margin_order': margin_order,
+            'rebalance_order': rebalance_order,
+            'warnings': [],
+        }
+    }
+
+
+def execute_unified_base_asset_buy(exchange,
+                                   strategy,
+                                   asset='ETH',
+                                   quote_usd='0',
+                                   buy_mode='margin',
+                                   hedge_ratio='0.5',
+                                   live_trade_enabled=0):
+    if str(live_trade_enabled) not in ('1', 'true', 'True'):
+        return {'status': 500, 'msg': '未开启真实下单'}
+
+    preview = preview_unified_base_asset_buy(exchange, strategy, asset,
+                                             quote_usd, buy_mode, hedge_ratio)
+    if preview.get('status') != 0:
+        return preview
+
+    account = make_binance_account_adapter(exchange, ACCOUNT_TYPE_UNIFIED)
+    order_params = preview['data']['margin_order']
+    try:
+        order = account.place_margin_order(order_params)
+        log_print(order)
+    except Exception as e:
+        log_print(f'统一账户底仓买入{asset}失败')
+        log_print(e)
+        return {'status': -1, 'msg': f'统一账户底仓买入{asset}失败: {e}'}
+
+    executed_qty = decimal_or_zero(order.get('executedQty'))
+    commission = Decimal('0')
+    for fill in order.get('fills', []):
+        commission += decimal_or_zero(fill.get('commission'))
+    executed_base_qty = executed_qty - commission
+    borrow_asset = order.get('marginBuyBorrowAsset', '')
+    borrow_amount = decimal_or_zero(order.get('marginBuyBorrowAmount'))
+
+    balance = account.get_margin_asset_balance(asset)
+    if balance['total'] <= 0:
+        return {
+            'status': 500,
+            'msg': f'{asset}买入后没有落到现货/杠杆侧，已停止自动半套',
+            'data': {
+                'margin_order': order_params,
+                'margin_order_raw': order,
+            }
+        }
+
+    if has_app_context():
+        create_or_update_unified_margin_rebalance(
+            strategy=strategy,
+            asset=asset,
+            hedge_ratio=hedge_ratio,
+            live_trade_enabled=live_trade_enabled,
+            last_buy_order_id=order.get('orderId', ''),
+            hedge_market='um',
+            buy_mode=normalize_unified_buy_mode(buy_mode),
+            margin_side_effect_type=order_params.get('sideEffectType', ''),
+            target_quote_usd=quote_usd,
+            last_borrow_asset=borrow_asset,
+            last_borrow_amount=borrow_amount,
+            last_executed_base_qty=executed_base_qty,
+            base_wallet_source='MARGIN_OR_SPOT')
+
+    rebalance = rebalance_unified_margin_asset(exchange, strategy, asset,
+                                               Decimal(str(hedge_ratio)),
+                                               True, hedge_market='um')
+    return {
+        'status': 0 if rebalance.get('status') == 0 else rebalance.get('status'),
+        'msg': '统一账户底仓买入并触发U本位半套完成'
+        if rebalance.get('status') == 0 else rebalance.get('msg', ''),
+        'data': {
+            'margin_order': order_params,
+            'margin_order_result': {
+                'order_id': order.get('orderId', ''),
+                'executed_base_qty': str(executed_base_qty),
+                'borrow_asset': borrow_asset,
+                'borrow_amount': str(borrow_amount),
+            },
+            'rebalance': rebalance,
+        }
+    }
+
+
 def create_or_update_unified_margin_rebalance(strategy,
                                               asset,
                                               hedge_ratio='0.5',
                                               live_trade_enabled=0,
-                                              last_buy_order_id=''):
+                                              last_buy_order_id='',
+                                              hedge_market='um',
+                                              buy_mode='cash',
+                                              margin_side_effect_type='',
+                                              target_quote_usd='0',
+                                              last_borrow_asset='',
+                                              last_borrow_amount='0',
+                                              last_executed_base_qty='0',
+                                              base_wallet_source='MARGIN_OR_SPOT'):
     asset = (asset or '').upper()
     hedge_ratio = Decimal(str(hedge_ratio or '0.5'))
     live_trade_enabled = 1 if str(live_trade_enabled) in ('1', 'true', 'True') else 0
+    hedge_market = (hedge_market or 'um').lower()
+    if hedge_market not in ('um', 'cm'):
+        hedge_market = 'um'
     item = CtaUnifiedMarginRebalance.query.filter(
         CtaUnifiedMarginRebalance.strategy == strategy,
         CtaUnifiedMarginRebalance.asset == asset,
@@ -6435,14 +6739,24 @@ def create_or_update_unified_margin_rebalance(strategy,
                                          asset=asset,
                                          spot_symbol=f'{asset}USDT',
                                          hedge_symbol=f'{asset}USDT',
-                                         hedge_market='um')
+                                         hedge_market=hedge_market)
         db.session.add(item)
 
+    item.hedge_symbol = f'{asset}USDT' if hedge_market == 'um' else f'{asset}USD_PERP'
+    item.hedge_market = hedge_market
+    item.buy_mode = buy_mode or 'cash'
+    item.margin_side_effect_type = margin_side_effect_type or ''
+    item.target_quote_usd = Decimal(str(target_quote_usd or '0'))
+    item.base_wallet_source = base_wallet_source or 'MARGIN_OR_SPOT'
     item.hedge_ratio = hedge_ratio
     item.live_trade_enabled = live_trade_enabled
     item.is_running = 1
     if last_buy_order_id:
         item.last_buy_order_id = str(last_buy_order_id)
+    if last_borrow_asset:
+        item.last_borrow_asset = str(last_borrow_asset)
+    item.last_borrow_amount = Decimal(str(last_borrow_amount or '0'))
+    item.last_executed_base_qty = Decimal(str(last_executed_base_qty or '0'))
     db.session.commit()
     return item.to_dict()
 
@@ -6470,12 +6784,16 @@ def rebalance_unified_margin_asset(exchange,
                                    strategy,
                                    asset,
                                    hedge_ratio,
-                                   live_trade_enabled=False):
+                                   live_trade_enabled=False,
+                                   hedge_market='um'):
     if exchange is None or not strategy or not asset:
         return {'status': 500, 'msg': 'params error'}
 
     asset = asset.upper()
     hedge_symbol = f'{asset}USDT'
+    hedge_market = (hedge_market or 'um').lower()
+    if hedge_market != 'um':
+        return {'status': 500, 'msg': '当前统一账户自动半套仅支持U本位ETHUSDT'}
     account = make_binance_account_adapter(exchange, ACCOUNT_TYPE_UNIFIED)
     trade_rules = get_um_symbol_trade_rules(exchange, hedge_symbol)
     if trade_rules is None:
@@ -6620,7 +6938,8 @@ def cta_unified_margin_rebalance_force(exchange, strategy, asset):
     if item.live_trade_enabled != 1:
         return {'status': 500, 'msg': '未开启真实下单'}
     return rebalance_unified_margin_asset(exchange, strategy, item.asset,
-                                          item.hedge_ratio, True)
+                                          item.hedge_ratio, True,
+                                          hedge_market=item.hedge_market)
 
 
 def dapi_buy_coin_with_unified_account(exchange, asset, usd_num):

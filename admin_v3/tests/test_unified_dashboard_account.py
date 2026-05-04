@@ -42,6 +42,8 @@ class UnifiedDashboardExchange:
             'cmWalletBalance': '0',
             'cmUnrealizedPNL': '0',
             'umUnrealizedPNL': '12',
+            'crossMarginBorrowed': '25',
+            'crossMarginInterest': '0.1',
             'totalAvailableBalance': '1100',
         }, {
             'asset': 'ETH',
@@ -292,6 +294,35 @@ class UnifiedDashboardAccountTest(unittest.TestCase):
         self.assertEqual(wallets['data']['items'][0]['wallet_type'], 'UM')
         self.assertEqual(summary['data']['items'][0]['strategy'],
                          'admin_v3_unified')
+
+    def test_account_v2_overview_exposes_wallet_assets_and_margin_debts(self):
+        overview = get_account_v2_overview(self.exchange, 'admin_v3_unified',
+                                           'unified')
+
+        assets = get_account_v2_overview_section(overview, 'wallet_assets')
+        debts = get_account_v2_overview_section(overview, 'margin_debts')
+
+        self.assertEqual(assets['status'], 0)
+        eth = [item for item in assets['data']['items']
+               if item['asset'] == 'ETH'][0]
+        self.assertEqual(eth['margin_or_spot_amount'], 0)
+        self.assertEqual(eth['cm_wallet_amount'], 2.0)
+        self.assertFalse(eth['is_base_asset_available'])
+        usdt_debt = [item for item in debts['data']['items']
+                     if item['asset'] == 'USDT'][0]
+        self.assertEqual(usdt_debt['borrowed_amount'], 25.0)
+        self.assertEqual(usdt_debt['interest_amount'], 0.1)
+
+    def test_account_v2_wallet_assets_mark_cross_margin_eth_as_base_asset(self):
+        overview = get_account_v2_overview(UnifiedCrossMarginEthExchange(),
+                                           'admin_v3_unified', 'unified')
+
+        assets = get_account_v2_overview_section(overview, 'wallet_assets')
+        eth = assets['data']['items'][0]
+
+        self.assertEqual(eth['asset'], 'ETH')
+        self.assertEqual(eth['margin_or_spot_amount'], 0.04)
+        self.assertTrue(eth['is_base_asset_available'])
 
 
 if __name__ == '__main__':

@@ -905,6 +905,53 @@ def cta_unified_margin_rebalance_create_or_update():
     data = request.get_json() or {}
     res = make_response(jsonify(create_or_update_unified_margin_rebalance(
         data.get('strategy'), data.get('asset'), data.get('hedge_ratio', '0.5'),
+        data.get('live_trade_enabled', 0),
+        hedge_market=data.get('hedge_market', 'um'),
+        buy_mode=data.get('buy_mode', 'cash'),
+        margin_side_effect_type=data.get('margin_side_effect_type', ''),
+        target_quote_usd=data.get('target_quote_usd', '0'))))
+    res = decorate_res(res)
+    return res
+
+
+@app.route('/cta/unified/base_asset/buy/preview',
+           methods=['POST', 'OPTIONS'])
+def cta_unified_base_asset_buy_preview():
+    if request.method == 'OPTIONS':
+        res = make_response(jsonify({'status': 0, 'msg': ''}))
+        res = decorate_res(res)
+        return res
+    data = request.get_json(silent=True) or request.form or {}
+    strategy = data.get('strategy')
+    exchange = get_exchange(binance_list, strategy)
+    res = make_response(jsonify(preview_unified_base_asset_buy(
+        exchange,
+        strategy,
+        data.get('asset', 'ETH'),
+        data.get('quote_usd') or data.get('num') or '0',
+        data.get('buy_mode', 'margin'),
+        data.get('hedge_ratio', '0.5'))))
+    res = decorate_res(res)
+    return res
+
+
+@app.route('/cta/unified/base_asset/buy/execute',
+           methods=['POST', 'OPTIONS'])
+def cta_unified_base_asset_buy_execute():
+    if request.method == 'OPTIONS':
+        res = make_response(jsonify({'status': 0, 'msg': ''}))
+        res = decorate_res(res)
+        return res
+    data = request.get_json(silent=True) or request.form or {}
+    strategy = data.get('strategy')
+    exchange = get_exchange(binance_list, strategy)
+    res = make_response(jsonify(execute_unified_base_asset_buy(
+        exchange,
+        strategy,
+        data.get('asset', 'ETH'),
+        data.get('quote_usd') or data.get('num') or '0',
+        data.get('buy_mode', 'margin'),
+        data.get('hedge_ratio', '0.5'),
         data.get('live_trade_enabled', 0))))
     res = decorate_res(res)
     return res

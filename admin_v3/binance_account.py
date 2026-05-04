@@ -67,23 +67,21 @@ class BinanceAccountAdapter:
             for item in self.get_balance_assets():
                 if item.get('asset') != asset:
                     continue
-                total = Decimal(str(item.get('totalWalletBalance')
-                                    or item.get('crossMarginFree')
-                                    or item.get('walletBalance') or '0'))
-                free = Decimal(str(item.get('crossMarginFree')
-                                   or item.get('totalAvailableBalance')
-                                   or item.get('totalWalletBalance')
-                                   or item.get('walletBalance') or total))
+                free = Decimal(str(item.get('crossMarginFree') or '0'))
+                locked = Decimal(str(item.get('crossMarginLocked') or '0'))
+                total = free + locked
                 return {
                     'asset': asset,
                     'total': total,
                     'free': free,
+                    'locked': locked,
                     'raw': item,
                 }
             return {
                 'asset': asset,
                 'total': Decimal('0'),
                 'free': Decimal('0'),
+                'locked': Decimal('0'),
                 'raw': {},
             }
 
@@ -98,14 +96,22 @@ class BinanceAccountAdapter:
                 'asset': asset,
                 'total': free + locked,
                 'free': free,
+                'locked': locked,
                 'raw': item,
             }
         return {
             'asset': asset,
             'total': Decimal('0'),
             'free': Decimal('0'),
+            'locked': Decimal('0'),
             'raw': {},
         }
+
+    def get_margin_max_borrowable(self, asset):
+        if not self.is_unified:
+            return {'asset': asset, 'amount': '0'}
+        return self.exchange.papiGetMarginMaxBorrowable(
+            params={'asset': (asset or '').upper()})
 
     def get_cm_account(self):
         if self.is_unified:

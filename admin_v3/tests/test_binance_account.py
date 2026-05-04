@@ -44,6 +44,8 @@ class FakeExchange:
         return [{
             'asset': 'ETH',
             'totalWalletBalance': '2.2',
+            'crossMarginFree': '0.4',
+            'crossMarginLocked': '0.1',
             'umWalletBalance': '0.2',
             'umUnrealizedPNL': '0.1',
             'cmWalletBalance': '2',
@@ -265,8 +267,9 @@ class BinanceAccountAdapterTest(unittest.TestCase):
         balance = adapter.get_margin_asset_balance('ETH')
 
         self.assertEqual(balance['asset'], 'ETH')
-        self.assertEqual(balance['total'], Decimal('2.2'))
-        self.assertEqual(balance['free'], Decimal('2.2'))
+        self.assertEqual(balance['total'], Decimal('0.5'))
+        self.assertEqual(balance['free'], Decimal('0.4'))
+        self.assertEqual(balance['locked'], Decimal('0.1'))
         self.assertIn(('papi_balance', None), exchange.calls)
 
     def test_standard_account_reads_legacy_summary_and_um_positions(self):
