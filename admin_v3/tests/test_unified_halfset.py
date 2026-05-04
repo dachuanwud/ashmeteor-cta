@@ -285,6 +285,26 @@ class HalfsetReconcileTest(unittest.TestCase):
         self.assertEqual(data['order']['quantity'], '0.218000')
         self.assertEqual(exchange.orders, [])
 
+    def test_explicit_preview_does_not_inherit_db_live_trade_switch(self):
+        exchange = HalfsetExchange(position_amt='-0.218')
+
+        res = reconcile_unified_halfset_position(
+            exchange, {
+                'strategy': 'admin_v3_unified',
+                'asset': 'ETH',
+                'hedge_symbol': 'ETHUSDT',
+                'hedge_ratio': Decimal('0.5'),
+                'last_signal': 1,
+                'live_trade_enabled': 1,
+            },
+            live_trade_enabled=False,
+        )
+
+        self.assertEqual(res['status'], 0)
+        self.assertEqual(res['msg'], '完整半套协调预览完成，未真实下单')
+        self.assertEqual(res['data']['order']['side'], 'BUY')
+        self.assertEqual(exchange.orders, [])
+
 
 class HalfsetExecutionIsolationTest(unittest.TestCase):
     def test_cta_signal_updates_one_overlay_and_reconciles_all_overlays(self):

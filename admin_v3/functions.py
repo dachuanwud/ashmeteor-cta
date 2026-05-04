@@ -7634,7 +7634,7 @@ def reconcile_unified_halfset_position(exchange,
                                        asset=None,
                                        hedge_ratio='0.5',
                                        cta_signal=None,
-                                       live_trade_enabled=False,
+                                       live_trade_enabled=None,
                                        cta_sizing_mode='auto_remaining',
                                        cta_budget_usd='0',
                                        cta_trade_ratio='1',
@@ -7646,8 +7646,10 @@ def reconcile_unified_halfset_position(exchange,
     hedge_ratio = item.get('hedge_ratio', hedge_ratio)
     if cta_signal is None:
         cta_signal = item.get('last_signal', 0)
-    live_trade_enabled = boolish(
-        item.get('live_trade_enabled', live_trade_enabled))
+    if live_trade_enabled is None:
+        live_trade_enabled = boolish(item.get('live_trade_enabled', 0))
+    else:
+        live_trade_enabled = boolish(live_trade_enabled)
     cta_sizing_mode = item.get('cta_sizing_mode', cta_sizing_mode)
     cta_budget_usd = item.get('cta_budget_usd', cta_budget_usd)
     cta_trade_ratio = item.get('cta_trade_ratio', cta_trade_ratio)
