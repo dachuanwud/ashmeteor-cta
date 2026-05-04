@@ -1,6 +1,8 @@
 import os
 import sys
+import tempfile
 import unittest
+from decimal import Decimal
 from unittest.mock import patch
 
 import pandas as pd
@@ -9,8 +11,22 @@ from sqlalchemy import create_engine
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from schedule_task import (_append_ledger_row, _concat_ledger_frame,
+                           cta_usdt_takeprofit_and_stoploss,
                            _get_um_margin_balance, _read_ledger_table,
                            _write_ledger_rows)
+
+
+class _NoopContext:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+
+class _FakeApp:
+    def app_context(self):
+        return _NoopContext()
 
 
 class UnifiedAccountSummaryExchange:
@@ -81,6 +97,32 @@ class ScheduleTaskCompatTest(unittest.TestCase):
                                          'unified')
 
         self.assertEqual(balance, 123.45)
+
+    def test_usdt_tpsl_skips_open_position_without_open_price(self):
+        trade_info = {
+            'strategy': 'admin_v3_unified',
+            'symbol': 'ETHUSDT',
+            'signal': 1,
+            'position_amount': Decimal('0.2'),
+            'open_price': None,
+            'takeprofit_percentage': Decimal('0.50'),
+            'takeprofit_drawdown_percentage': Decimal('0.05'),
+            'stoploss_percentage': Decimal('0.05'),
+            'open_tpsl': 1,
+            'interval': '4h',
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir, \
+                patch('schedule_task.scheduler.app', _FakeApp()), \
+                patch('schedule_task.fapi_path', tmpdir), \
+                patch('schedule_task.cta_usdt_get_all_need_tpsl_cta_keys',
+                      return_value=['ETHUSDT_4h_demo']), \
+                patch('schedule_task.cta_usdt_get_trade_info',
+                      return_value=trade_info), \
+                patch('schedule_task.fetch_binance_ticker_data') as ticker:
+            cta_usdt_takeprofit_and_stoploss([])
+
+        ticker.assert_not_called()
 
 
 if __name__ == '__main__':

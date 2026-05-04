@@ -931,6 +931,9 @@ def cta_usdt_takeprofit_and_stoploss(*args):
             symbol = trade_info['symbol']
             pos_amount = Decimal(trade_info['position_amount'])
             open_price = trade_info['open_price']
+            if open_price in (None, '', 0, '0'):
+                log_print(f'{cta_key}开仓价为空,跳过止盈止损')
+                continue
             last_price = Decimal(fetch_binance_ticker_data(exchange, symbol))
             profit_ratio = Decimal(
                 f'{signal * (last_price / open_price - 1):.4f}')
@@ -1522,6 +1525,9 @@ def cta_usd_takeprofit_and_stoploss(*args):
             symbol = trade_info['symbol']
             pos_amount = Decimal(trade_info['position_amount'])
             open_price = trade_info['open_price']
+            if open_price in (None, '', 0, '0'):
+                log_print(f'{cta_key}开仓价为空,跳过止盈止损')
+                continue
             last_price = Decimal(
                 fetch_binance_dapi_ticker_data(exchange, symbol))
             profit_ratio = Decimal(
