@@ -1225,6 +1225,31 @@ def build_account_v2_dashboard_items(data, base_asset='ETH'):
         if exposure.get('net_base_exposure') not in (None, '') else
         base_qty + current_um_position)
     cta_overlay_position = current_um_position + target_hedge_qty
+    has_rebalance_config = bool(exposure.get('asset')
+                                or exposure.get('strategy')
+                                or exposure.get('hedge_symbol'))
+    rebalance_is_running = boolish(exposure.get('is_running', 0))
+    live_trade_enabled = boolish(exposure.get('live_trade_enabled', 0))
+    position_gap = decimal_or_zero(
+        exposure.get('position_gap')
+        if exposure.get('position_gap') not in (None, '') else
+        (-target_hedge_qty - current_um_position if has_rebalance_config
+         else 0))
+
+    if not has_rebalance_config and base_qty > 0:
+        next_action_hint = '可启动统一账户半套'
+    elif not has_rebalance_config:
+        next_action_hint = '未配置统一账户半套'
+    elif not rebalance_is_running:
+        next_action_hint = '统一账户半套已暂停'
+    elif hedge_ratio <= 0:
+        next_action_hint = '半套比例为0，不会自动建立空头'
+    elif not live_trade_enabled:
+        next_action_hint = '真实下单关闭，定时巡检只会生成预览'
+    elif abs(position_gap) > Decimal('0'):
+        next_action_hint = '等待定时巡检或手动强制半套'
+    else:
+        next_action_hint = '半套仓位已接近目标'
 
     return [{
         'strategy':
@@ -1265,8 +1290,19 @@ def build_account_v2_dashboard_items(data, base_asset='ETH'):
             decimal_to_float(cta_overlay_position, 8),
         'net_base_exposure':
             decimal_to_float(net_base_exposure, 8),
+        'rebalance_running':
+            '已启动' if rebalance_is_running else
+            ('已暂停' if has_rebalance_config else '未配置'),
+        'live_trade_enabled':
+            '已开启' if live_trade_enabled else '关闭',
+        'last_rebalance_time':
+            exposure.get('last_rebalance_time', ''),
+        'position_gap':
+            decimal_to_float(position_gap, 8),
+        'next_action_hint':
+            next_action_hint,
         'last_msg':
-            exposure.get('last_msg', ''),
+            exposure.get('last_msg', '') or next_action_hint,
         'workflow':
             '全仓杠杆买ETH -> 现货/杠杆底仓 -> U本位半套 -> CTA overlay -> 净暴露',
         'risk_note':
@@ -6884,6 +6920,71 @@ def create_or_update_unified_margin_rebalance(strategy,
     return item.to_dict()
 
 
+def boolish(value):
+    return str(value) in ('1', 'true', 'True') or value is True
+
+
+def cta_unified_margin_rebalance_start(strategy,
+                                       asset='ETH',
+                                       hedge_ratio='0.5',
+                                       live_trade_enabled=0,
+                                       hedge_market='um'):
+    if not strategy:
+        return {'status': 500, 'msg': 'strategy不能为空'}
+
+    asset = (asset or 'ETH').upper()
+    hedge_market = (hedge_market or 'um').lower()
+    if hedge_market != 'um':
+        return {'status': 500, 'msg': '当前统一账户半套启动仅支持U本位ETHUSDT'}
+
+    item = CtaUnifiedMarginRebalance.query.filter(
+        CtaUnifiedMarginRebalance.strategy == strategy,
+        CtaUnifiedMarginRebalance.asset == asset,
+        CtaUnifiedMarginRebalance.is_del == 0).first()
+    if item is None:
+        item = CtaUnifiedMarginRebalance(strategy=strategy,
+                                         asset=asset,
+                                         spot_symbol=f'{asset}USDT',
+                                         hedge_symbol=f'{asset}USDT',
+                                         hedge_market='um',
+                                         buy_mode='margin',
+                                         base_wallet_source='MARGIN_OR_SPOT')
+        db.session.add(item)
+
+    item.spot_symbol = f'{asset}USDT'
+    item.hedge_symbol = f'{asset}USDT'
+    item.hedge_market = 'um'
+    item.base_wallet_source = 'MARGIN_OR_SPOT'
+    item.hedge_ratio = Decimal(str(hedge_ratio or '0.5'))
+    item.live_trade_enabled = 1 if boolish(live_trade_enabled) else 0
+    item.is_running = 1
+    item.last_status = 0
+    item.last_msg = ('统一账户半套已启动，真实下单已开启'
+                     if item.live_trade_enabled == 1
+                     else '统一账户半套已启动，真实下单关闭，仅定时预览')
+    db.session.commit()
+    return {'status': 0, 'msg': item.last_msg, 'data': item.to_dict()}
+
+
+def cta_unified_margin_rebalance_stop(strategy, asset='ETH'):
+    if not strategy:
+        return {'status': 500, 'msg': 'strategy不能为空'}
+
+    asset = (asset or 'ETH').upper()
+    item = CtaUnifiedMarginRebalance.query.filter(
+        CtaUnifiedMarginRebalance.strategy == strategy,
+        CtaUnifiedMarginRebalance.asset == asset,
+        CtaUnifiedMarginRebalance.is_del == 0).first()
+    if item is None:
+        return {'status': 500, 'msg': '统一账户半套配置不存在'}
+
+    item.is_running = 0
+    item.last_status = 0
+    item.last_msg = '统一账户半套已暂停，未自动平仓'
+    db.session.commit()
+    return {'status': 0, 'msg': item.last_msg, 'data': item.to_dict()}
+
+
 def update_unified_margin_rebalance_state(strategy, asset, data):
     if not has_app_context():
         return
@@ -7047,6 +7148,69 @@ def cta_unified_margin_rebalance_get_list(binance_list, strategy=None, asset=Non
             'total': len(items),
         }
     }
+
+
+def cta_unified_margin_rebalance_get_running_items():
+    if not has_app_context():
+        return []
+    return CtaUnifiedMarginRebalance.query.filter(
+        CtaUnifiedMarginRebalance.is_del == 0,
+        CtaUnifiedMarginRebalance.is_running == 1).order_by(
+            CtaUnifiedMarginRebalance.strategy,
+            CtaUnifiedMarginRebalance.asset).all()
+
+
+def _rebalance_item_value(item, key, default=None):
+    if isinstance(item, dict):
+        return item.get(key, default)
+    return getattr(item, key, default)
+
+
+def cta_unified_margin_rebalance_run_items(binance_list, items):
+    results = []
+    for item in items or []:
+        if not boolish(_rebalance_item_value(item, 'is_running', 0)):
+            continue
+        strategy = _rebalance_item_value(item, 'strategy')
+        asset = (_rebalance_item_value(item, 'asset', 'ETH') or 'ETH').upper()
+        exchange = get_exchange(binance_list, strategy)
+        if exchange is None:
+            results.append({
+                'strategy': strategy,
+                'asset': asset,
+                'status': 500,
+                'msg': '账户不存在',
+            })
+            continue
+        res = rebalance_unified_margin_asset(
+            exchange,
+            strategy,
+            asset,
+            Decimal(str(_rebalance_item_value(item, 'hedge_ratio', '0.5')
+                        or '0.5')),
+            boolish(_rebalance_item_value(item, 'live_trade_enabled', 0)),
+            hedge_market=_rebalance_item_value(item, 'hedge_market', 'um'))
+        results.append({
+            'strategy': strategy,
+            'asset': asset,
+            'status': res.get('status'),
+            'msg': res.get('msg', ''),
+            'data': res.get('data', {}),
+        })
+
+    return {
+        'status': 0,
+        'msg': '',
+        'data': {
+            'items': results,
+            'total': len(results),
+        }
+    }
+
+
+def cta_unified_margin_rebalance_run(binance_list):
+    return cta_unified_margin_rebalance_run_items(
+        binance_list, cta_unified_margin_rebalance_get_running_items())
 
 
 def cta_unified_margin_rebalance_force(exchange, strategy, asset):

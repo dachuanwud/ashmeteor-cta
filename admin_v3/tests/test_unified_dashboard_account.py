@@ -380,6 +380,10 @@ class UnifiedDashboardAccountTest(unittest.TestCase):
             'target_base_qty': 0.25,
             'current_um_position': -0.3,
             'net_base_exposure': 0.2,
+            'position_gap': 0.05,
+            'is_running': 1,
+            'live_trade_enabled': 1,
+            'last_rebalance_time': '2026-05-04 12:00:00',
             'last_msg': '半套执行成功',
         }
 
@@ -405,7 +409,26 @@ class UnifiedDashboardAccountTest(unittest.TestCase):
         self.assertEqual(row['current_um_position'], -0.3)
         self.assertEqual(row['cta_overlay_position'], -0.05)
         self.assertEqual(row['net_base_exposure'], 0.2)
+        self.assertEqual(row['rebalance_running'], '已启动')
+        self.assertEqual(row['live_trade_enabled'], '已开启')
+        self.assertEqual(row['position_gap'], 0.05)
+        self.assertEqual(row['last_rebalance_time'], '2026-05-04 12:00:00')
+        self.assertIn('巡检', row['next_action_hint'])
         self.assertIn('两套逻辑', row['risk_note'])
+
+    def test_account_v2_dashboard_prompts_start_when_base_exists_without_rebalance(self):
+        with patch('functions.get_account_v2_strategy_exposures',
+                   return_value=[]):
+            overview = get_account_v2_overview(UnifiedCockpitExchange(),
+                                               'admin_v3_unified', 'unified')
+
+        dashboard = get_account_v2_overview_section(overview, 'dashboard')
+        row = dashboard['data']['items'][0]
+
+        self.assertEqual(row['base_asset_qty'], 0.5)
+        self.assertEqual(row['rebalance_running'], '未配置')
+        self.assertEqual(row['live_trade_enabled'], '关闭')
+        self.assertIn('可启动统一账户半套', row['next_action_hint'])
 
 
 if __name__ == '__main__':

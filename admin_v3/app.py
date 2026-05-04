@@ -916,6 +916,38 @@ def cta_unified_margin_rebalance_create_or_update():
     return res
 
 
+@app.route('/cta/unified/margin_rebalance/start',
+           methods=['POST', 'OPTIONS'])
+def cta_unified_margin_rebalance_start_route():
+    if request.method == 'OPTIONS':
+        res = make_response(jsonify({'status': 0, 'msg': ''}))
+        res = decorate_res(res)
+        return res
+    data = request.get_json(silent=True) or request.form or {}
+    res = make_response(jsonify(cta_unified_margin_rebalance_start(
+        data.get('strategy'),
+        data.get('asset', 'ETH'),
+        data.get('hedge_ratio', '0.5'),
+        data.get('live_trade_enabled', 0),
+        data.get('hedge_market', 'um'))))
+    res = decorate_res(res)
+    return res
+
+
+@app.route('/cta/unified/margin_rebalance/stop',
+           methods=['POST', 'OPTIONS'])
+def cta_unified_margin_rebalance_stop_route():
+    if request.method == 'OPTIONS':
+        res = make_response(jsonify({'status': 0, 'msg': ''}))
+        res = decorate_res(res)
+        return res
+    data = request.get_json(silent=True) or request.form or {}
+    res = make_response(jsonify(cta_unified_margin_rebalance_stop(
+        data.get('strategy'), data.get('asset', 'ETH'))))
+    res = decorate_res(res)
+    return res
+
+
 @app.route('/cta/unified/base_asset/buy/preview',
            methods=['POST', 'OPTIONS'])
 def cta_unified_base_asset_buy_preview():
@@ -1463,6 +1495,14 @@ def init_cta_usdt(flag):
                       args=[binance_list],
                       trigger='cron',
                       minute='5',
+                      misfire_grace_time=300)
+
+    # 统一账户U本位半套定时巡检。真实下单由每条配置的开关控制。
+    scheduler.add_job(id=f'cta_unified_margin_rebalance',
+                      func=cta_unified_margin_rebalance,
+                      args=binance_list,
+                      trigger='cron',
+                      minute=f"*/16",
                       misfire_grace_time=300)
 
     # 启动U本位CTA策略BNB燃烧

@@ -8,6 +8,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from functions import (dapi_buy_coin_list_and_transfer,
                        dapi_buy_coin_and_transfer,
+                       cta_unified_margin_rebalance_run_items,
                        execute_unified_base_asset_buy,
                        fetch_binance_dapi_ticker_data,
                        fetch_binance_ticker_data,
@@ -373,6 +374,71 @@ class BuyCoinAndTickerTest(unittest.TestCase):
 
         self.assertEqual(res['status'], 500)
         self.assertIn('ETHUSDT不支持U本位半套', res['msg'])
+        self.assertEqual(exchange.orders, [])
+
+    def test_unified_margin_rebalance_scheduler_dry_run_updates_preview_without_order(self):
+        exchange = UnifiedMarginRebalanceExchange(asset_qty='2',
+                                                  position_amt='0')
+        item = {
+            'strategy': 'acct',
+            'asset': 'ETH',
+            'hedge_ratio': Decimal('0.5'),
+            'is_running': 1,
+            'live_trade_enabled': 0,
+            'hedge_market': 'um',
+        }
+
+        res = cta_unified_margin_rebalance_run_items([{
+            'strategy': 'acct',
+            'exchange': exchange,
+        }], [item])
+
+        self.assertEqual(res['status'], 0)
+        self.assertEqual(res['data']['total'], 1)
+        self.assertIn('预览', res['data']['items'][0]['msg'])
+        self.assertEqual(exchange.orders, [])
+
+    def test_unified_margin_rebalance_scheduler_live_adjusts_um_short(self):
+        exchange = UnifiedMarginRebalanceExchange(asset_qty='2',
+                                                  position_amt='0')
+        item = {
+            'strategy': 'acct',
+            'asset': 'ETH',
+            'hedge_ratio': Decimal('0.5'),
+            'is_running': 1,
+            'live_trade_enabled': 1,
+            'hedge_market': 'um',
+        }
+
+        res = cta_unified_margin_rebalance_run_items([{
+            'strategy': 'acct',
+            'exchange': exchange,
+        }], [item])
+
+        self.assertEqual(res['status'], 0)
+        self.assertEqual(exchange.orders[0]['symbol'], 'ETHUSDT')
+        self.assertEqual(exchange.orders[0]['side'], 'SELL')
+        self.assertEqual(str(exchange.orders[0]['quantity']), '1.000')
+
+    def test_unified_margin_rebalance_scheduler_skips_paused_items(self):
+        exchange = UnifiedMarginRebalanceExchange(asset_qty='2',
+                                                  position_amt='0')
+        item = {
+            'strategy': 'acct',
+            'asset': 'ETH',
+            'hedge_ratio': Decimal('0.5'),
+            'is_running': 0,
+            'live_trade_enabled': 1,
+            'hedge_market': 'um',
+        }
+
+        res = cta_unified_margin_rebalance_run_items([{
+            'strategy': 'acct',
+            'exchange': exchange,
+        }], [item])
+
+        self.assertEqual(res['status'], 0)
+        self.assertEqual(res['data']['total'], 0)
         self.assertEqual(exchange.orders, [])
 
     def test_fetch_um_tickers_only_converts_last_price_to_numeric(self):

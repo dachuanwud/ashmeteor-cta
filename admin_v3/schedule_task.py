@@ -1723,3 +1723,8 @@ def cta_usd_rebalance(*args):
                     else:
                         log_print(f'{cta_key}半套执行失败，请排查')
                         send_wechat(f'{cta_key}半套执行失败，请排查')
+
+
+def cta_unified_margin_rebalance(*args):
+    with scheduler.app.app_context():
+        return cta_unified_margin_rebalance_run(list(args))
