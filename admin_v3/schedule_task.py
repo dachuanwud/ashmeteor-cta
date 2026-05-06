@@ -12,6 +12,9 @@ import time
 import os
 from model import CtaUsdt
 import config
+from services.cta_runtime import (align_cta_run_time, build_cta_key,
+                                  calculate_cta_signal,
+                                  merge_closed_kline_history)
 
 scheduler = APScheduler()
 
@@ -468,38 +471,19 @@ def cta_excute_period(*args, **kwargs):
         account = make_binance_account_adapter(exchange, account_type)
         order_func = account.place_um_order
 
-        cta_key = '_'.join((symbol, interval, cta, period))
-
-        run_time = datetime.now()
-        run_time = run_time.replace(second=0, microsecond=0)
-        if interval.find('h') >= 0:
-            interval_num = int(interval.split('h')[0])
-            hour = run_time.hour // interval_num * interval_num
-            run_time = run_time.replace(hour=hour, minute=0)
-        elif interval.find('m') >= 0:
-            interval_num = int(interval.split('m')[0])
-            minute = run_time.minute // interval_num * interval_num
-            run_time = run_time.replace(minute=minute)
+        cta_key = build_cta_key(symbol, interval, cta, period)
+        run_time = align_cta_run_time(interval=interval)
 
         symbol_data = pd.read_csv(f'{fapi_path}/{cta_key}.csv',
                                   parse_dates=['candle_begin_time'])
         # 增量获取50条K线
         new_kline = get_kline(exchange, symbol, interval, 50)
 
-        symbol_data = pd.concat([symbol_data, new_kline])
-        symbol_data.sort_values(by=['candle_begin_time'], inplace=True)
-        symbol_data.drop_duplicates(subset=['candle_begin_time'],
-                                    keep='last',
-                                    inplace=True)
+        symbol_data = merge_closed_kline_history(symbol_data, new_kline,
+                                                 run_time)
+        symbol_data.to_csv(f'{fapi_path}/{cta_key}.csv', index=False)
 
-        # 删除runtime那行的数据，如果有的话
-        symbol_data = symbol_data[symbol_data['candle_begin_time'] < run_time]
-        symbol_data.reset_index(drop=True, inplace=True)
-        symbol_data.iloc[-10000:].to_csv(f'{fapi_path}/{cta_key}.csv',
-                                         index=False)
-
-        df, *_ = getattr(factors, cta)(symbol_data.copy(),
-                                       factors.parse_cta_period(period))
+        df, signal = calculate_cta_signal(symbol_data, cta, period, factors)
 
         # 是否开启信号定期校准, 校准数据库与实盘信号差异
         if pos_infer:
@@ -1274,38 +1258,19 @@ def cta_usd_excute_period(*args, **kwargs):
         account = make_binance_account_adapter(exchange, account_type)
         order_func = account.place_cm_order
 
-        cta_key = '_'.join((symbol, interval, cta, period))
-
-        run_time = datetime.now()
-        run_time = run_time.replace(second=0, microsecond=0)
-        if interval.find('h') >= 0:
-            interval_num = int(interval.split('h')[0])
-            hour = run_time.hour // interval_num * interval_num
-            run_time = run_time.replace(hour=hour, minute=0)
-        elif interval.find('m') >= 0:
-            interval_num = int(interval.split('m')[0])
-            minute = run_time.minute // interval_num * interval_num
-            run_time = run_time.replace(minute=minute)
+        cta_key = build_cta_key(symbol, interval, cta, period)
+        run_time = align_cta_run_time(interval=interval)
 
         symbol_data = pd.read_csv(f'{dapi_path}/{cta_key}.csv',
                                   parse_dates=['candle_begin_time'])
         # 增量获取50条K线
         new_kline = dapi_get_kline(exchange, symbol, interval, 50)
 
-        symbol_data = pd.concat([symbol_data, new_kline])
-        symbol_data.sort_values(by=['candle_begin_time'], inplace=True)
-        symbol_data.drop_duplicates(subset=['candle_begin_time'],
-                                    keep='last',
-                                    inplace=True)
+        symbol_data = merge_closed_kline_history(symbol_data, new_kline,
+                                                 run_time)
+        symbol_data.to_csv(f'{dapi_path}/{cta_key}.csv', index=False)
 
-        # 删除runtime那行的数据，如果有的话
-        symbol_data = symbol_data[symbol_data['candle_begin_time'] < run_time]
-        symbol_data.reset_index(drop=True, inplace=True)
-        symbol_data.iloc[-10000:].to_csv(f'{dapi_path}/{cta_key}.csv',
-                                         index=False)
-
-        df, *_ = getattr(factors, cta)(symbol_data.copy(),
-                                       factors.parse_cta_period(period))
+        df, signal = calculate_cta_signal(symbol_data, cta, period, factors)
 
         # 是否开启信号定期校准, 校准数据库与实盘信号差异
         if pos_infer:
