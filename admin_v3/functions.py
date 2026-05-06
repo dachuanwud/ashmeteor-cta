@@ -15,6 +15,9 @@ from model import (CtaUnifiedHalfsetMode, CtaUnifiedHalfsetOverlay,
 from exts import db
 from binance_account import (ACCOUNT_TYPE_STANDARD, ACCOUNT_TYPE_UNIFIED,
                              make_binance_account_adapter)
+from services import account_snapshot, halfset_coordinator
+from services.exchange_gateway import make_exchange_gateway
+from services.repositories import first_active
 import time
 import json
 import pandas as pd
@@ -509,7 +512,7 @@ def change_positionside_dual(exchange, type):
 def get_account_positions_list(exchange, account_type=ACCOUNT_TYPE_STANDARD):
     if exchange is None:
         return {'status': 0, 'msg': '', 'data': {'items': []}}
-    account = make_binance_account_adapter(exchange, account_type)
+    account = make_exchange_gateway(exchange, account_type)
     if account.is_unified:
         account_info = account.get_account_summary()
         positions = [
@@ -1013,37 +1016,37 @@ def build_account_v2_margin_debts(exchange, wallet_assets):
 
 
 def build_account_v2_position(exchange, raw_position, market_type):
-    amount = decimal_or_zero(raw_position.get('positionAmt'))
-    if amount == 0:
-        return None
-    symbol = raw_position.get('symbol', '')
-    mark_price = decimal_or_zero(raw_position.get('markPrice')
-                                 or raw_position.get('lastPrice'))
     raw_notional = decimal_or_zero(raw_position.get('notional')
                                    or raw_position.get('notionalValue'))
-    base_notional_qty = amount
-    if market_type == 'CM':
-        base_notional_qty = build_account_v2_cm_base_notional(
-            exchange, symbol, amount, mark_price, raw_notional)
-        notional = abs(base_notional_qty * mark_price) if mark_price > 0 else 0
-    else:
-        notional = abs(raw_notional)
-        if notional == 0:
-            notional = abs(amount * mark_price)
-    unrealized = decimal_or_zero(raw_position.get('unRealizedProfit')
-                                 or raw_position.get('unrealizedProfit'))
-    side = 'SELL' if amount < 0 else 'BUY'
+    contract_size = Decimal('0')
+    if (market_type or '').upper() == 'CM' and raw_notional == 0:
+        contract_size = get_account_v2_cm_contract_size(
+            exchange, raw_position.get('symbol', ''))
+    position = account_snapshot.build_position_snapshot(
+        raw_position, market_type, contract_size=contract_size)
+    if position is None:
+        return None
     return {
-        'market_type': market_type,
-        'symbol': symbol,
-        'side': side,
-        'position_amount': decimal_to_float(amount, 8),
-        'base_notional_qty': decimal_to_float(base_notional_qty, 8),
-        'entry_price': decimal_to_float(raw_position.get('entryPrice'), 8),
-        'mark_price': decimal_to_float(mark_price, 8),
-        'notional_usd': decimal_to_float(notional, 4),
-        'unrealized_profit_usd': decimal_to_float(unrealized, 4),
-        'leverage': decimal_to_float(raw_position.get('leverage'), 4),
+        'market_type':
+            position['market_type'],
+        'symbol':
+            position['symbol'],
+        'side':
+            position['side'],
+        'position_amount':
+            decimal_to_float(position['position_amount'], 8),
+        'base_notional_qty':
+            decimal_to_float(position['base_notional_qty'], 8),
+        'entry_price':
+            decimal_to_float(position['entry_price'], 8),
+        'mark_price':
+            decimal_to_float(position['mark_price'], 8),
+        'notional_usd':
+            decimal_to_float(position['notional_usd'], 4),
+        'unrealized_profit_usd':
+            decimal_to_float(position['unrealized_profit_usd'], 4),
+        'leverage':
+            decimal_to_float(position['leverage'], 4),
     }
 
 
@@ -1219,12 +1222,12 @@ def get_account_v2_cm_contract_size(exchange, symbol):
 
 def build_account_v2_cm_base_notional(exchange, symbol, amount, mark_price,
                                       raw_notional):
-    if raw_notional != 0:
-        return raw_notional
-    contract_size = get_account_v2_cm_contract_size(exchange, symbol)
-    if contract_size > 0 and mark_price > 0:
-        return amount * contract_size / mark_price
-    return Decimal('0')
+    contract_size = Decimal('0')
+    if decimal_or_zero(raw_notional) == 0:
+        contract_size = get_account_v2_cm_contract_size(exchange, symbol)
+    return account_snapshot.calculate_cm_base_notional(
+        amount, mark_price, raw_notional=raw_notional,
+        contract_size=contract_size)
 
 
 def get_account_v2_unmanaged_cm_symbols(positions, base_asset, hedge_symbol):
@@ -6788,7 +6791,7 @@ def preview_unified_base_asset_buy(exchange,
         return {'status': 500, 'msg': '请填写至少10U的底仓买入名义'}
 
     buy_mode = normalize_unified_buy_mode(buy_mode)
-    account = make_binance_account_adapter(exchange, ACCOUNT_TYPE_UNIFIED)
+    account = make_exchange_gateway(exchange, ACCOUNT_TYPE_UNIFIED)
     summary = account.get_account_summary()
     account_status = summary.get('accountStatus', 'UNKNOWN')
     if account_status != 'NORMAL':
@@ -7205,8 +7208,7 @@ def cta_unified_margin_rebalance_get_list(binance_list, strategy=None, asset=Non
         exchange = get_exchange(binance_list, item.strategy)
         if exchange is not None:
             try:
-                account = make_binance_account_adapter(exchange,
-                                                       ACCOUNT_TYPE_UNIFIED)
+                account = make_exchange_gateway(exchange, ACCOUNT_TYPE_UNIFIED)
                 balance = account.get_margin_asset_balance(item.asset)
                 position = get_um_position_amount(account, item.hedge_symbol)
                 row['asset_base_qty'] = balance['total']
@@ -7320,28 +7322,11 @@ def cta_unified_margin_rebalance_force(exchange, strategy, asset):
 
 
 def _normalize_halfset_signal(signal):
-    if signal is None:
-        return Decimal('0')
-    try:
-        if pd.isna(signal):
-            return Decimal('0')
-    except Exception:
-        pass
-    value = Decimal(str(int(signal)))
-    if value > 0:
-        return Decimal('1')
-    if value < 0:
-        return Decimal('-1')
-    return Decimal('0')
+    return halfset_coordinator.normalize_halfset_signal(signal)
 
 
 def _clamp_ratio(value):
-    ratio = decimal_or_zero(value)
-    if ratio < 0:
-        return Decimal('0')
-    if ratio > 1:
-        return Decimal('1')
-    return ratio
+    return halfset_coordinator.clamp_ratio(value)
 
 
 def calculate_unified_halfset_targets(base_qty,
@@ -7352,101 +7337,23 @@ def calculate_unified_halfset_targets(base_qty,
                                       cta_budget_usd='0',
                                       cta_trade_ratio='1',
                                       last_price=None):
-    base_qty = decimal_or_zero(base_qty)
-    hedge_ratio = _clamp_ratio(hedge_ratio)
-    signal = _normalize_halfset_signal(signal)
-    current_um_position = decimal_or_zero(current_um_position)
-    cta_trade_ratio = decimal_or_zero(cta_trade_ratio) or Decimal('1')
-    cta_sizing_mode = cta_sizing_mode or 'auto_remaining'
-    warning = ''
-
-    half_target_qty = -base_qty * hedge_ratio
-    if cta_sizing_mode == 'manual_usd':
-        price = decimal_or_zero(last_price)
-        if price <= 0:
-            cta_target_qty = Decimal('0')
-            warning = '价格缺失，无法按手动USDT预算计算CTA目标'
-        else:
-            cta_target_qty = (signal * decimal_or_zero(cta_budget_usd) *
-                              cta_trade_ratio / price)
-    else:
-        cta_sizing_mode = 'auto_remaining'
-        cta_target_qty = signal * base_qty * (Decimal('1') - hedge_ratio)
-
-    total_target_qty = half_target_qty + cta_target_qty
-    order_delta_qty = total_target_qty - current_um_position
-    return {
-        'base_qty': base_qty,
-        'hedge_ratio': hedge_ratio,
-        'signal': signal,
-        'cta_sizing_mode': cta_sizing_mode,
-        'half_target_qty': half_target_qty,
-        'cta_target_qty': cta_target_qty,
-        'total_target_qty': total_target_qty,
-        'current_um_position': current_um_position,
-        'order_delta_qty': order_delta_qty,
-        'warning': warning,
-    }
+    return halfset_coordinator.calculate_halfset_targets(
+        base_qty,
+        hedge_ratio,
+        signal,
+        current_um_position,
+        cta_sizing_mode=cta_sizing_mode,
+        cta_budget_usd=cta_budget_usd,
+        cta_trade_ratio=cta_trade_ratio,
+        last_price=last_price)
 
 
 def calculate_unified_halfset_multi_targets(base_qty,
                                             hedge_ratio,
                                             overlays,
                                             current_um_position='0'):
-    base_qty = decimal_or_zero(base_qty)
-    hedge_ratio = _clamp_ratio(hedge_ratio)
-    current_um_position = decimal_or_zero(current_um_position)
-    half_target_qty = -base_qty * hedge_ratio
-    cta_budget_qty = base_qty * (Decimal('1') - hedge_ratio)
-
-    overlay_rows = []
-    total_weight = Decimal('0')
-    for overlay in overlays or []:
-        row = _overlay_to_dict(overlay)
-        is_running = boolish(row.get('is_running', 0))
-        weight = max(decimal_or_zero(row.get('weight', 1)), Decimal('0'))
-        trade_ratio = max(decimal_or_zero(row.get('trade_ratio', 1)),
-                          Decimal('0'))
-        effective_weight = weight * trade_ratio if is_running else Decimal('0')
-        total_weight += effective_weight
-        row.update({
-            'is_running': 1 if is_running else 0,
-            'last_signal': int(_normalize_halfset_signal(
-                row.get('last_signal', row.get('signal', 0)))),
-            'weight': weight,
-            'trade_ratio': trade_ratio,
-            'effective_weight': effective_weight,
-        })
-        overlay_rows.append(row)
-
-    cta_target_qty = Decimal('0')
-    for row in overlay_rows:
-        if total_weight > 0 and row['effective_weight'] > 0:
-            target_qty = (Decimal(row['last_signal']) * cta_budget_qty *
-                          row['effective_weight'] / total_weight)
-        else:
-            target_qty = Decimal('0')
-        row['target_qty'] = target_qty
-        cta_target_qty += target_qty
-
-    total_target_qty = half_target_qty + cta_target_qty
-    aggregate_signal = 0
-    if cta_target_qty > 0:
-        aggregate_signal = 1
-    elif cta_target_qty < 0:
-        aggregate_signal = -1
-    return {
-        'base_qty': base_qty,
-        'hedge_ratio': hedge_ratio,
-        'half_target_qty': half_target_qty,
-        'cta_target_qty': cta_target_qty,
-        'total_target_qty': total_target_qty,
-        'current_um_position': current_um_position,
-        'order_delta_qty': total_target_qty - current_um_position,
-        'signal': aggregate_signal,
-        'overlays': overlay_rows,
-        'warning': '',
-    }
+    return halfset_coordinator.calculate_halfset_multi_targets(
+        base_qty, hedge_ratio, overlays, current_um_position)
 
 
 def _halfset_value(item, key, default=None):
@@ -7506,16 +7413,7 @@ def cta_unified_halfset_defaults(data=None):
 
 
 def _overlay_to_dict(item):
-    if item is None:
-        return {}
-    if isinstance(item, dict):
-        return dict(item)
-    if hasattr(item, 'to_dict'):
-        return item.to_dict()
-    keys = ('id', 'strategy', 'asset', 'cta_key', 'symbol', 'interval', 'cta',
-            'period', 'weight', 'trade_ratio', 'is_running', 'last_signal',
-            'target_qty', 'last_signal_time', 'last_status', 'last_msg')
-    return {key: getattr(item, key, '') for key in keys}
+    return halfset_coordinator.overlay_to_dict(item)
 
 
 def cta_unified_halfset_overlay_defaults(data=None):
@@ -7595,9 +7493,8 @@ def cta_unified_halfset_get_overlay_dicts(strategy,
 def cta_unified_halfset_get_overlay(cta_key):
     if not has_app_context() or not cta_key:
         return None
-    return CtaUnifiedHalfsetOverlay.query.filter(
-        CtaUnifiedHalfsetOverlay.cta_key == cta_key,
-        CtaUnifiedHalfsetOverlay.is_del == 0).first()
+    return first_active(CtaUnifiedHalfsetOverlay,
+                        CtaUnifiedHalfsetOverlay.cta_key == cta_key)
 
 
 def cta_unified_halfset_attach_overlays(item, overlays=None):
@@ -7681,11 +7578,8 @@ def update_unified_halfset_overlay_state(cta_key, data):
 
 
 def _halfset_order_is_reduce_only(current_position, order_delta, target_position):
-    if current_position < 0 and order_delta > 0 and target_position <= 0:
-        return True
-    if current_position > 0 and order_delta < 0 and target_position >= 0:
-        return True
-    return False
+    return halfset_coordinator.order_is_reduce_only(
+        current_position, order_delta, target_position)
 
 
 def reconcile_unified_halfset_position(exchange,
@@ -7719,7 +7613,7 @@ def reconcile_unified_halfset_position(exchange,
     if exchange is None or not strategy or not asset:
         return {'status': 500, 'msg': 'params error'}
 
-    account = make_binance_account_adapter(exchange, ACCOUNT_TYPE_UNIFIED)
+    account = make_exchange_gateway(exchange, ACCOUNT_TYPE_UNIFIED)
     trade_rules = get_um_symbol_trade_rules(exchange, hedge_symbol)
     if trade_rules is None:
         msg = f'{hedge_symbol}不支持完整半套模式'
